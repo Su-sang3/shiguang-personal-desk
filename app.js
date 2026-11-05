@@ -7,6 +7,16 @@
 
 (() => {
   const STORAGE_KEY = 'shiguang.personaldesk.v1';
+  const BACKGROUND_STORAGE_KEY = 'shiguang.personaldesk.background';
+  const BACKGROUNDS = [
+    { id: 'mist', label: '雾蓝', color: '#f7f8fb' },
+    { id: 'warm', label: '暖白', color: '#fbf8f5' },
+    { id: 'sage', label: '鼠尾草', color: '#f4f8f3' },
+    { id: 'blush', label: '藕粉', color: '#fbf4f4' },
+    { id: 'oat', label: '燕麦', color: '#f8f4ea' },
+    { id: 'lilac', label: '淡紫', color: '#f7f4fb' }
+  ];
+  const DEFAULT_BACKGROUND = BACKGROUNDS[0].id;
 
   const CATEGORY_COLORS = [
     '#557FE8',
@@ -950,7 +960,17 @@
     return seeded;
   }
 
+  function loadBackgroundPreference() {
+    try {
+      const saved = localStorage.getItem(BACKGROUND_STORAGE_KEY);
+      return BACKGROUNDS.some((background) => background.id === saved) ? saved : DEFAULT_BACKGROUND;
+    } catch (error) {
+      return DEFAULT_BACKGROUND;
+    }
+  }
+
   let data = loadData();
+  let currentBackground = loadBackgroundPreference();
 
   /* ----------------------------- Recurring series ----------------------------- */
 
@@ -1070,6 +1090,8 @@
     menuBtn: document.getElementById('menuBtn'),
     sidebar: document.getElementById('sidebar'),
     sidebarBackdrop: document.getElementById('sidebarBackdrop'),
+    backgroundOptions: document.getElementById('backgroundOptions'),
+    themeColorMeta: document.querySelector('meta[name="theme-color"]'),
     searchWrap: document.getElementById('searchWrap'),
     searchInput: document.getElementById('searchInput'),
     searchResults: document.getElementById('searchResults'),
@@ -1158,6 +1180,46 @@
   let taskTagExtras = [];
   let assistantStarted = false;
   let assistantLastCategoryId = '';
+
+  /* ----------------------------- Background theme ----------------------------- */
+
+  function getBackground(id) {
+    return BACKGROUNDS.find((background) => background.id === id) || BACKGROUNDS[0];
+  }
+
+  function renderBackgroundOptions() {
+    if (!dom.backgroundOptions) return;
+    dom.backgroundOptions.innerHTML = BACKGROUNDS.map((background) => {
+      const active = background.id === currentBackground;
+      return `
+        <button class="background-swatch${active ? ' is-active' : ''}" type="button" data-background-choice="${background.id}" style="--swatch: ${background.color}" aria-label="${background.label}背景" aria-pressed="${active}" title="${background.label}"></button>`;
+    }).join('');
+  }
+
+  function syncBackgroundPicker() {
+    if (!dom.backgroundOptions) return;
+    dom.backgroundOptions.querySelectorAll('[data-background-choice]').forEach((button) => {
+      const active = button.dataset.backgroundChoice === currentBackground;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
+  function applyBackground(id, options = {}) {
+    const background = getBackground(id);
+    currentBackground = background.id;
+    document.documentElement.dataset.background = background.id;
+    if (dom.themeColorMeta) dom.themeColorMeta.setAttribute('content', background.color);
+    syncBackgroundPicker();
+
+    if (options.persist === false) return;
+    try {
+      localStorage.setItem(BACKGROUND_STORAGE_KEY, background.id);
+    } catch (error) {
+      console.warn('无法保存背景颜色。', error);
+      showToast('背景颜色已切换，但未能保存到本机。', 'error');
+    }
+  }
 
   /* ----------------------------- Sidebar / topbar ----------------------------- */
 
@@ -3993,6 +4055,12 @@
         return;
       }
 
+      const backgroundChoice = target.closest('[data-background-choice]');
+      if (backgroundChoice) {
+        applyBackground(backgroundChoice.dataset.backgroundChoice);
+        return;
+      }
+
       const calendarDay = target.closest('[data-calendar-date]');
       if (calendarDay) {
         setSelectedDate(calendarDay.dataset.calendarDate);
@@ -4254,6 +4322,8 @@
 
   function init() {
     hydrateStaticIcons();
+    renderBackgroundOptions();
+    applyBackground(currentBackground, { persist: false });
     const carried = carryOverUnfinishedTasks();
     const generated = ensureRecurringTasks();
     if (carried || generated) saveData();

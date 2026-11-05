@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-background="mist">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,7 +7,17 @@
   <meta name="description" content="拾光 · 本地个人工作台，用温柔的方式安排工作、学习、生活与购物。">
   <title>拾光 · 本地个人工作台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23F17C6D'/%3E%3Cpath d='M32 13l3.8 13.2L49 30l-13.2 3.8L32 47l-3.8-13.2L15 30l13.2-3.8z' fill='white'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=20261105a">
+  <link rel="stylesheet" href="styles.css?v=20261106a">
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('shiguang.personaldesk.background');
+        if (saved) document.documentElement.dataset.background = saved;
+      } catch (error) {
+        // localStorage may be unavailable in private or restricted contexts.
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="app-shell">
@@ -58,6 +68,10 @@
       </div>
 
       <div class="sidebar-footer">
+        <div class="background-picker">
+          <span class="background-picker-label">背景</span>
+          <div class="background-options" id="backgroundOptions" role="group" aria-label="选择背景颜色"></div>
+        </div>
         <div class="save-state"><span class="save-dot"></span><span>已自动保存到本机</span></div>
         <div class="shortcut-legend"><span><kbd>N</kbd>新建</span><span><kbd>/</kbd>搜索</span></div>
       </div>
@@ -447,6 +461,6 @@
     <span class="toast-message" id="toastMessage"></span>
   </div>
 
-  <script src="app.js?v=20261105a"></script>
+  <script src="app.js?v=20261106a"></script>
 </body>
 </html>
