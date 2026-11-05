@@ -7,6 +7,8 @@
 **在线体验：** <https://su-sang3.github.io/shiguang-personal-desk/>
 
 > 在线版使用通用示例数据，不包含个人数据；本地版的数据仍然只保存在你自己的浏览器里。
+>
+> 页面由 GitHub Pages 从 `main` 分支自动部署，推送到 `main` 后会自动更新。
 
 ## 功能
 
