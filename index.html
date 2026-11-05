@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f7f8fb">
+  <meta name="description" content="拾光 · 本地个人工作台，用温柔的方式安排工作、学习、生活与购物。">
+  <title>拾光 · 本地个人工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23F17C6D'/%3E%3Cpath d='M32 13l3.8 13.2L49 30l-13.2 3.8L32 47l-3.8-13.2L15 30l13.2-3.8z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css?v=20261105a">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    <aside class="sidebar" id="sidebar" aria-label="侧边导航">
+      <div class="sidebar-brand">
+        <div class="brand-mark" aria-hidden="true"><span data-icon="sparkles"></span></div>
+        <div class="brand-copy">
+          <div class="brand-name">拾光</div>
+          <div class="brand-sub">PERSONAL DESK</div>
+        </div>
+      </div>
+
+      <div class="sidebar-scroll">
+        <button class="btn btn-primary btn-block sidebar-create" data-action="new-task" type="button">
+          <span data-icon="plus"></span>
+          <span>新建事项</span>
+          <kbd>N</kbd>
+        </button>
+
+        <nav class="sidebar-nav" aria-label="工作台导航">
+          <p class="nav-label">工作台</p>
+          <button class="nav-item" data-view="overview" data-nav="overview" type="button">
+            <span class="nav-icon" data-icon="grid"></span>
+            <span>总览</span>
+          </button>
+          <button class="nav-item" data-view="week" data-nav="week" type="button">
+            <span class="nav-icon" data-icon="calendarDays"></span>
+            <span>本周时间线</span>
+          </button>
+          <button class="nav-item" data-view="expiry" data-nav="expiry" type="button">
+            <span class="nav-icon" data-icon="hourglass"></span>
+            <span>期限记录</span>
+            <span class="nav-badge" id="expiryNavBadge" hidden>0</span>
+          </button>
+
+          <div class="nav-label-row">
+            <p class="nav-label">我的分类</p>
+            <span class="nav-label-meta" id="categoryCount">0</span>
+          </div>
+          <div class="category-nav" id="categoryNav"></div>
+          <button class="add-category" data-action="new-category" type="button">
+            <span data-icon="plus"></span>
+            <span>新建分类</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="save-state"><span class="save-dot"></span><span>已自动保存到本机</span></div>
+        <div class="shortcut-legend"><span><kbd>N</kbd>新建</span><span><kbd>/</kbd>搜索</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="打开导航菜单" aria-controls="sidebar" aria-expanded="false">
+            <span data-icon="menu"></span>
+          </button>
+          <div class="breadcrumb">
+            <span class="breadcrumb-home">拾光工作台</span>
+            <span class="breadcrumb-sep">/</span>
+            <strong id="topbarCrumb">总览</strong>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <div class="search-wrap" id="searchWrap" role="search">
+            <div class="search-box">
+              <span class="search-icon" data-icon="search"></span>
+              <input id="searchInput" type="search" placeholder="搜索事项、期限记录、分类或备注…" autocomplete="off" aria-label="搜索事项与期限记录">
+              <kbd class="search-kbd">/</kbd>
+            </div>
+            <div class="search-results" id="searchResults" hidden></div>
+          </div>
+          <div class="topbar-date"><span data-icon="calendar"></span><span id="topbarDate"></span></div>
+          <button class="btn btn-primary topbar-create" data-action="new-task" type="button">
+            <span data-icon="plus"></span><span class="create-label">新建事项</span><kbd>N</kbd>
+          </button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div id="viewRoot"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 新建 / 编辑事项 -->
+  <dialog class="modal" id="taskDialog" aria-labelledby="taskDialogTitle">
+    <form class="modal-card" id="taskForm" novalidate>
+      <input type="hidden" name="taskId" id="taskId">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker" id="taskDialogKicker">NEW TASK</p>
+          <h2 id="taskDialogTitle">新建事项</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="taskDialog" aria-label="关闭">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">事项名称 <em>*</em></span>
+          <input id="taskTitle" name="title" type="text" maxlength="80" autocomplete="off" placeholder="比如：完成本周复盘初稿">
+        </label>
+
+        <div class="field">
+          <span class="field-label">归属分类 <em>*</em></span>
+          <div class="category-choice" id="taskCategoryChoices"></div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">来源标签 <span class="optional">可选 · 可多选</span></span>
+          <div class="tag-choice" id="taskTagChoices"></div>
+          <div class="tag-custom">
+            <input id="taskTagInput" name="taskTagInput" type="text" maxlength="12" autocomplete="off" aria-label="新标签名称" placeholder="没有合适的？输入一个新标签">
+            <button class="tag-add-btn" id="addTaskTagBtn" type="button">添加</button>
+          </div>
+        </div>
+
+        <div class="form-grid form-grid-date">
+          <label class="field">
+            <span class="field-label" id="taskDateLabel">开始日期 <em>*</em></span>
+            <input id="taskDate" name="taskDate" type="date">
+            <span class="field-hint" id="taskSeriesNote" hidden></span>
+            <span class="field-hint is-carried" id="taskCarryNote" hidden></span>
+          </label>
+          <div class="field">
+            <span class="field-label">当天时间（可选）</span>
+            <div class="time-range">
+              <input id="taskStartTime" name="startTime" type="time" aria-label="开始时间">
+              <span class="time-sep">—</span>
+              <input id="taskEndTime" name="endTime" type="time" aria-label="结束时间">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-callout">
+          <div class="callout-head">
+            <span class="callout-title"><span data-icon="flag"></span>DDL 截止时间</span>
+            <span class="optional">可选</span>
+          </div>
+          <div class="form-grid">
+            <label class="field compact">
+              <span class="field-label">截止日期</span>
+              <input id="taskDdlDate" name="ddlDate" type="date">
+            </label>
+            <label class="field compact">
+              <span class="field-label">截止时间</span>
+              <input id="taskDdlTime" name="ddlTime" type="time">
+            </label>
+          </div>
+          <p class="callout-note">未完成时，安排日期之后到 DDL 之间会出现在今日日程的「进行中」区。</p>
+        </div>
+
+        <div class="form-callout repeat-callout">
+          <div class="callout-head">
+            <span class="callout-title"><span data-icon="repeat"></span>循环任务</span>
+            <span class="optional">让事项自动出现</span>
+          </div>
+          <div class="form-grid">
+            <label class="field compact">
+              <span class="field-label">重复频率</span>
+              <select id="taskRepeat" name="repeat">
+                <option value="">不重复</option>
+                <option value="daily">每天</option>
+                <option value="weekdays">每个工作日</option>
+                <option value="interval">每隔几天</option>
+                <option value="weekly">每周</option>
+                <option value="monthly">每月</option>
+              </select>
+            </label>
+            <label class="field compact">
+              <span class="field-label">重复结束 <span class="optional">可选</span></span>
+              <input id="taskRepeatUntil" name="repeatUntil" type="date">
+            </label>
+            <label class="field compact repeat-interval-field" id="taskIntervalField" hidden>
+              <span class="field-label">间隔天数</span>
+              <div class="interval-field-control">
+                <input id="taskIntervalDays" name="intervalDays" type="number" min="2" max="365" step="1" value="2" inputmode="numeric">
+                <span>天一次</span>
+              </div>
+            </label>
+          </div>
+          <p class="repeat-hint" id="repeatHint">不重复时，这是一件独立事项。</p>
+        </div>
+
+        <fieldset class="field field-reset">
+          <legend class="field-label">优先级</legend>
+          <div class="priority-choice">
+            <label><input type="radio" name="priority" value="normal" checked><span><i class="priority-dot normal"></i>普通</span></label>
+            <label><input type="radio" name="priority" value="important"><span><i class="priority-dot important"></i>重要</span></label>
+            <label><input type="radio" name="priority" value="urgent"><span><i class="priority-dot urgent"></i>紧急</span></label>
+          </div>
+        </fieldset>
+
+        <label class="field">
+          <span class="field-label">备注 <span class="optional">可选</span></span>
+          <textarea name="note" id="taskNote" rows="3" maxlength="300" placeholder="补充地点、准备事项，或者给自己的小提醒…"></textarea>
+        </label>
+
+        <p class="form-error" id="taskFormError" role="alert"></p>
+      </div>
+
+      <footer class="modal-footer">
+        <button class="btn btn-danger-ghost" id="deleteTaskBtn" type="button">
+          <span data-icon="trash"></span>删除事项
+        </button>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-dialog="taskDialog">取消</button>
+          <button class="btn btn-primary" type="submit">保存事项</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 新建 / 编辑分类 -->
+  <dialog class="modal" id="categoryDialog" aria-labelledby="categoryDialogTitle">
+    <form class="modal-card modal-card-sm" id="categoryForm" novalidate>
+      <input type="hidden" name="categoryId" id="categoryId">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker" id="categoryDialogKicker">NEW CATEGORY</p>
+          <h2 id="categoryDialogTitle">新建分类</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="categoryDialog" aria-label="关闭">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <div class="category-preview" id="categoryPreview">
+          <div class="category-preview-icon" id="categoryPreviewIcon"></div>
+          <div>
+            <span>分类预览</span>
+            <strong id="categoryPreviewName">新分类</strong>
+          </div>
+        </div>
+
+        <label class="field">
+          <span class="field-label">分类名称 <em>*</em></span>
+          <input id="categoryName" name="categoryName" type="text" maxlength="10" autocomplete="off" placeholder="比如：学习、运动、旅行…">
+        </label>
+
+        <label class="field">
+          <span class="field-label">来源标签预设 <span class="optional">可选</span></span>
+          <input id="categoryTags" name="categoryTags" type="text" maxlength="120" autocomplete="off" placeholder="用逗号分隔，比如：项目、会议、汇报">
+          <span class="field-hint">在事项里可多选；在事项中新建的标签也会自动收进这里。</span>
+        </label>
+
+        <fieldset class="field field-reset">
+          <legend class="field-label">选择图标</legend>
+          <div class="icon-choice" id="categoryIconChoices"></div>
+        </fieldset>
+
+        <fieldset class="field field-reset">
+          <legend class="field-label">选择颜色</legend>
+          <div class="color-choice" id="categoryColorChoices"></div>
+        </fieldset>
+        <p class="form-error" id="categoryFormError" role="alert"></p>
+      </div>
+
+      <footer class="modal-footer">
+        <button class="btn btn-danger-ghost" id="deleteCategoryBtn" type="button">
+          <span data-icon="trash"></span>删除分类
+        </button>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-dialog="categoryDialog">取消</button>
+          <button class="btn btn-primary" type="submit">保存分类</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 新建 / 编辑期限记录 -->
+  <dialog class="modal" id="expiryDialog" aria-labelledby="expiryDialogTitle">
+    <form class="modal-card modal-card-sm" id="expiryForm" novalidate>
+      <input type="hidden" name="expiryId" id="expiryId">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker" id="expiryDialogKicker">NEW EXPIRY</p>
+          <h2 id="expiryDialogTitle">记录一项期限</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="expiryDialog" aria-label="关闭">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">名称 <em>*</em></span>
+          <input id="expiryTitle" name="expiryTitle" type="text" maxlength="80" autocomplete="off" placeholder="比如：酸奶、视频会员、咖啡券">
+        </label>
+
+        <fieldset class="field field-reset">
+          <legend class="field-label">类型</legend>
+          <div class="expiry-type-choice" id="expiryTypeChoices"></div>
+        </fieldset>
+
+        <fieldset class="field field-reset">
+          <legend class="field-label">到期日怎么填 <em>*</em></legend>
+          <div class="expiry-date-mode" id="expiryDateModeChoices">
+            <label class="expiry-mode-option">
+              <input type="radio" name="expiryDateMode" value="manual" checked>
+              <span><span data-icon="calendar"></span>直接填到期日</span>
+            </label>
+            <label class="expiry-mode-option">
+              <input type="radio" name="expiryDateMode" value="calculated">
+              <span><span data-icon="hourglass"></span>生产日期 + 保质期</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="expiry-date-fields" id="expiryManualFields">
+          <label class="field">
+            <span class="field-label">到期日 <em>*</em></span>
+            <input id="expiryDate" name="expiryDate" type="date">
+            <span class="field-hint">已经过去的日期也可以记录，会标记为已过期。</span>
+          </label>
+        </div>
+
+        <div class="expiry-date-fields" id="expiryCalculatedFields" hidden>
+          <div class="form-grid form-grid-date">
+            <label class="field">
+              <span class="field-label">生产日期 <em>*</em></span>
+              <input id="expiryProductionDate" name="productionDate" type="date">
+            </label>
+            <label class="field">
+              <span class="field-label">保质期 <em>*</em></span>
+              <div class="expiry-shelf-life">
+                <input id="expiryShelfLifeValue" name="shelfLifeValue" type="number" min="1" max="1200" step="1" inputmode="numeric" placeholder="例如 6">
+                <select id="expiryShelfLifeUnit" name="shelfLifeUnit" aria-label="保质期单位">
+                  <option value="days">天</option>
+                  <option value="months" selected>个月</option>
+                  <option value="years">年</option>
+                </select>
+              </div>
+            </label>
+          </div>
+          <div class="expiry-calc-preview" id="expiryCalcPreview" aria-live="polite">
+            <span class="expiry-calc-icon" data-icon="calendar"></span>
+            <span class="expiry-calc-copy">
+              <span>预计到期日</span>
+              <strong id="expiryCalcDate">填写后自动计算</strong>
+            </span>
+            <span class="expiry-calc-hint" id="expiryCalcHint"></span>
+          </div>
+          <p class="field-hint">按生产日期 + 保质期自动计算，月末会取目标月份的最后一天。</p>
+        </div>
+
+        <div class="expiry-form-note">
+          <span data-icon="info"></span>
+          <span>只在本机保存与展示，不会发送系统通知。</span>
+        </div>
+
+        <label class="field">
+          <span class="field-label">备注 <span class="optional">可选</span></span>
+          <textarea id="expiryNote" name="expiryNote" rows="3" maxlength="300" placeholder="数量、兑换码、口味、使用方式…"></textarea>
+        </label>
+        <p class="form-error" id="expiryFormError" role="alert"></p>
+      </div>
+
+      <footer class="modal-footer">
+        <button class="btn btn-danger-ghost" id="deleteExpiryBtn" type="button" hidden>
+          <span data-icon="trash"></span>删除记录
+        </button>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-dialog="expiryDialog">取消</button>
+          <button class="btn btn-primary" type="submit">保存记录</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 确认弹窗 -->
+  <dialog class="modal" id="confirmDialog" aria-labelledby="confirmTitle">
+    <div class="modal-card modal-card-xs">
+      <div class="confirm-icon" id="confirmIcon"><span data-icon="trash"></span></div>
+      <h2 id="confirmTitle">确认删除？</h2>
+      <p class="confirm-message" id="confirmMessage">删除后无法恢复。</p>
+      <div class="confirm-actions">
+        <button class="btn btn-ghost" id="confirmCancel" type="button">取消</button>
+        <button class="btn btn-secondary" id="confirmSecondary" type="button" hidden></button>
+        <button class="btn btn-danger" id="confirmButton" type="button">确认删除</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 本地指令助手 -->
+  <button class="assistant-fab" id="assistantFab" type="button" aria-label="打开拾光助手" aria-haspopup="dialog">
+    <span class="assistant-fab-icon" data-icon="sparkles"></span>
+    <span class="assistant-fab-label">助手</span>
+  </button>
+
+  <dialog class="assistant-dialog" id="assistantDialog" aria-labelledby="assistantTitle">
+    <div class="assistant-card">
+      <header class="assistant-head">
+        <div class="assistant-identity">
+          <span class="assistant-avatar" data-icon="sparkles" aria-hidden="true"></span>
+          <div>
+            <p class="assistant-kicker">LOCAL ASSISTANT</p>
+            <h2 id="assistantTitle">拾光助手</h2>
+          </div>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="assistantDialog" aria-label="关闭助手">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+
+      <div class="assistant-thread" id="assistantMessages" role="log" aria-live="polite" aria-label="助手消息"></div>
+
+      <div class="assistant-suggestions" id="assistantSuggestions" aria-label="快捷指令">
+        <button type="button" data-assistant-prompt="今天还有什么">今天还有什么</button>
+        <button type="button" data-assistant-prompt="明天 10:00 写周报 @工作 #汇报">新建带标签事项</button>
+        <button type="button" data-assistant-prompt="每天 8:00 晨跑 @生活 #健康">新建每天任务</button>
+        <button type="button" data-assistant-prompt="打开本周">打开本周</button>
+      </div>
+
+      <form class="assistant-form" id="assistantForm">
+        <label class="sr-only" for="assistantInput">给拾光助手发消息</label>
+        <textarea id="assistantInput" name="assistantInput" rows="1" maxlength="240" placeholder="试试：每天 8:00 晨跑 @生活 #健康"></textarea>
+        <button class="assistant-send" type="submit">
+          <span>发送</span>
+          <span data-icon="arrowRight" aria-hidden="true"></span>
+        </button>
+      </form>
+      <p class="assistant-note">本地指令助手，不联网。支持新建、完成、查询与跳转；更复杂的自然语言需求还需要接入模型服务。</p>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast-icon" id="toastIcon"><span data-icon="check"></span></span>
+    <span class="toast-message" id="toastMessage"></span>
+  </div>
+
+  <script src="app.js?v=20261105a"></script>
+</body>
+</html>

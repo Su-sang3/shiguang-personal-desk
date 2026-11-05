@@ -1,0 +1,13 @@
+# Local-only notes and generated documents
+/*.md
+!/README.md
+*.docx
+*.pdf
+*.pptx
+ppt_assets/
+ppt_build/
+build_report.py
+*-report.html
+Thumbs.db
+.DS_Store
+*.log
