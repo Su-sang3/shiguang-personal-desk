@@ -119,6 +119,8 @@
       <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M7 7l1 13h8l1-13M10 11v5M14 11v5"/>`,
     arrowRight: `<path d="M5 12h14M14 7l5 5-5 5"/>`,
     arrowUpRight: `<path d="M7 17 17 7M8 7h9v9"/>`,
+    download: `<path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M4 20h16"/>`,
+    upload: `<path d="M12 21V9M7.5 13.5 12 9l4.5 4.5M4 4h16"/>`,
     sun: `
       <circle cx="12" cy="12" r="4"/>
       <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/>`,
@@ -557,6 +559,17 @@
     const scheduled = tasksForDate(iso);
     if (iso !== todayISO()) return scheduled;
     return [...scheduled, ...ongoingTasksForToday()];
+  }
+
+  function getMakeupTasks(days = 30) {
+    const today = todayISO();
+    const cutoff = shiftISO(today, -days);
+    const shownToday = new Set(agendaTasksForDate(today).map((task) => task.id));
+    return data.tasks
+      .filter((task) => !task.done && task.date < today && task.date >= cutoff && !shownToday.has(task.id))
+      .sort((a, b) => b.date.localeCompare(a.date)
+        || (a.startTime || '00:00').localeCompare(b.startTime || '00:00')
+        || a.createdAt.localeCompare(b.createdAt));
   }
 
   function sortTasksByTime(a, b) {
@@ -1167,6 +1180,9 @@
     assistantInput: document.getElementById('assistantInput'),
     assistantMessages: document.getElementById('assistantMessages'),
     assistantSuggestions: document.getElementById('assistantSuggestions'),
+    backupDialog: document.getElementById('backupDialog'),
+    backupFileInput: document.getElementById('backupFileInput'),
+    backupStatus: document.getElementById('backupStatus'),
     toast: document.getElementById('toast'),
     toastIcon: document.getElementById('toastIcon'),
     toastMessage: document.getElementById('toastMessage')
@@ -1306,6 +1322,7 @@
         <div class="overview-layout">
           <div class="overview-main">
             ${renderAgenda()}
+            ${ui.selectedDate === todayISO() ? renderMakeupSection() : ''}
           </div>
           <aside class="overview-rail" aria-label="日程辅助信息">
             ${renderMiniCalendar()}
@@ -1529,6 +1546,61 @@
         ${body}
         ${tasks.length ? `<button class="agenda-add" type="button" data-action="new-task" data-category-id="${esc(newTaskCategory)}" data-date="${esc(ui.selectedDate)}">${icon('plus')}在这一天添加事项</button>` : ''}
       </section>`;
+  }
+
+  function renderMakeupSection() {
+    const activeFilter = ui.agendaFilter;
+    const all = getMakeupTasks(30);
+    const filtered = activeFilter === 'all' ? all : all.filter((task) => task.categoryId === activeFilter);
+    if (!filtered.length) return '';
+
+    const visible = filtered.slice(0, 8);
+    const hidden = filtered.length - visible.length;
+    const description = activeFilter === 'all'
+      ? '最近 30 天错过日期的循环或逾期事项，可以在这里补上。'
+      : `「${esc(getCategory(activeFilter).name)}」最近 30 天错过的事项。`;
+
+    return `
+      <section class="makeup-section" aria-label="待补打卡">
+        <header class="makeup-heading">
+          <div>
+            <p class="eyebrow">MAKE-UP CHECK-IN</p>
+            <div class="heading-line">
+              <h2>待补打卡</h2>
+              <span class="count-pill">${filtered.length}</span>
+            </div>
+            <p class="section-desc">${description}</p>
+          </div>
+          <button class="text-btn" type="button" data-action="go-week">本周时间线 ${icon('arrowRight')}</button>
+        </header>
+        <div class="makeup-list">${visible.map(renderMakeupRow).join('')}</div>
+        ${hidden ? `<p class="makeup-more">只显示最近 8 项，还有 ${hidden} 项更早的待补记录；可以在本周时间线里向前翻周继续补。</p>` : ''}
+      </section>`;
+  }
+
+  function renderMakeupRow(task) {
+    const category = getCategory(task.categoryId);
+    const series = taskSeries(task);
+    const recurrence = series ? seriesRecurrenceLabel(series) : '';
+
+    return `
+      <div class="makeup-row" style="${categoryVars(category)}">
+        <button class="task-check makeup-check" type="button" data-action="toggle-task" data-task-id="${esc(task.id)}" aria-label="补打卡：${esc(task.title)}，${esc(formatMonthDay(task.date))}" aria-pressed="false">${icon('check')}</button>
+        <div class="makeup-date">
+          <strong>${esc(formatShortNumeric(task.date))}</strong>
+          <span>${esc(weekdayName(task.date))}</span>
+        </div>
+        <div class="makeup-copy">
+          <div class="makeup-tags">
+            <span class="category-tag"><span class="dot"></span>${esc(category.name)}</span>
+            ${series ? `<span class="repeat-badge">${icon('repeat')}<span>${esc(recurrence)}</span></span>` : '<span class="makeup-tag">逾期</span>'}
+            ${renderTagChips(task.tags, 1)}
+          </div>
+          <strong class="makeup-title">${esc(task.title)}</strong>
+          <span class="makeup-meta">原安排 ${esc(formatMonthDay(task.date))}${series ? ` · ${esc(recurrence)}` : ''}</span>
+        </div>
+        <span class="makeup-action-hint">补</span>
+      </div>`;
   }
 
   function renderAgendaCard(task, options = {}) {
@@ -1982,10 +2054,17 @@
       const iso = shiftISO(recentStart, index);
       const occurrence = group.occurrences.find((task) => task.date === iso);
       const classes = [
+        'series-day',
         occurrence?.done ? 'is-done' : '',
+        !occurrence ? 'is-empty' : '',
         iso === todayISO() ? 'is-today' : ''
       ].filter(Boolean).join(' ');
-      return `<i class="${classes}" title="${esc(`${formatMonthDay(iso)}${occurrence ? occurrence.done ? ' · 已完成' : ' · 待完成' : ' · 无安排'}`)}">${parseISO(iso).getDate()}</i>`;
+      const day = parseISO(iso).getDate();
+      if (!occurrence) {
+        return `<span class="${classes}" title="${esc(`${formatMonthDay(iso)} · 无安排`)}">${day}</span>`;
+      }
+      const state = occurrence.done ? '已完成，点击恢复' : '未完成，点击补打卡';
+      return `<button class="${classes}" type="button" data-action="toggle-task" data-task-id="${esc(occurrence.id)}" aria-label="${esc(`${formatMonthDay(iso)} ${occurrence.title} ${state}`)}" title="${esc(`${formatMonthDay(iso)} · ${state}`)}">${day}</button>`;
     }).join('');
     const editor = group.task
       ? `<button class="series-edit" type="button" data-action="edit-task" data-task-id="${esc(group.task.id)}" aria-label="管理循环任务：${esc(series.title)}">${icon('pencil')}管理</button>`
@@ -2003,7 +2082,7 @@
           <span>${esc(todayCopy)}</span>
         </div>
         <div class="series-card-foot">
-          <span class="series-week" aria-label="最近 7 天完成情况">${weekDots}</span>
+          <span class="series-week" aria-label="最近 7 天完成情况，点击有安排的日期可以补打卡或恢复">${weekDots}</span>
           ${editor}
         </div>
       </article>`;
@@ -2451,6 +2530,103 @@
       dom.toast.classList.add('is-leaving');
       setTimeout(() => dom.toast.classList.remove('is-visible', 'is-leaving'), 190);
     }, 2800);
+  }
+
+  /* ----------------------------- Backup & import ----------------------------- */
+
+  function setBackupStatus(message = '', isError = false) {
+    if (!dom.backupStatus) return;
+    dom.backupStatus.textContent = message;
+    dom.backupStatus.classList.toggle('is-error', Boolean(message) && isError);
+  }
+
+  function backupFileName() {
+    const now = new Date();
+    const time = `${pad(now.getHours())}${pad(now.getMinutes())}`;
+    return `shiguang-backup-${toISO(now)}-${time}.json`;
+  }
+
+  function exportBackup() {
+    const payload = {
+      app: 'shiguang-personal-desk',
+      schemaVersion: data.version,
+      exportedAt: new Date().toISOString(),
+      data,
+      preferences: { background: currentBackground }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = backupFileName();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBackupStatus('备份已开始下载。');
+    showToast('备份文件已开始下载。');
+  }
+
+  async function handleBackupFile(event) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+
+    setBackupStatus('');
+    if (file.size > 10 * 1024 * 1024) {
+      setBackupStatus('导入失败：备份文件超过 10MB。', true);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const rawData = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.data
+        ? parsed.data
+        : parsed;
+      const preferences = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.preferences
+        ? parsed.preferences
+        : null;
+      const normalized = normalizeData(rawData);
+      if (!normalized) throw new Error('备份数据不完整');
+
+      const countsText = `${normalized.tasks.length} 个事项、${normalized.series.length} 个循环系列、${normalized.expiries.length} 条期限记录`;
+      setBackupStatus(`已读取备份：${countsText}。请确认是否覆盖当前数据。`);
+      showConfirm({
+        title: '覆盖导入这份备份？',
+        message: `备份包含 ${countsText}。导入后会覆盖当前浏览器里的数据，建议先导出当前备份。`,
+        confirmLabel: '覆盖导入',
+        tone: 'info',
+        onConfirm: () => {
+          data = normalized;
+          const carried = carryOverUnfinishedTasks();
+          const generated = ensureRecurringTasks();
+          saveData();
+          if (preferences?.background && BACKGROUNDS.some((background) => background.id === preferences.background)) {
+            applyBackground(preferences.background);
+          }
+          ui.view = 'overview';
+          ui.categoryId = null;
+          ui.selectedDate = todayISO();
+          ui.agendaFilter = 'all';
+          ui.categoryFilter = 'all';
+          ui.weekAnchor = startOfWeekISO();
+          ui.weekFilter = 'all';
+          ui.tagFilter = 'all';
+          ui.expiryFilter = 'all';
+          const selected = parseISO(ui.selectedDate);
+          ui.calendarCursor = new Date(selected.getFullYear(), selected.getMonth(), 1);
+          closeDialog(dom.backupDialog);
+          render();
+          showToast(`备份已导入：${countsText}。${carried || generated ? '已同步当前日期的循环与顺延事项。' : ''}`);
+        }
+      });
+    } catch (error) {
+      console.warn('导入备份失败。', error);
+      setBackupStatus('导入失败：请选择由拾光导出的 JSON 备份文件。', true);
+      showToast('备份文件读取失败。', 'error');
+    }
   }
 
   /* ----------------------------- Modal helpers ----------------------------- */
@@ -3290,11 +3466,14 @@
   function toggleTask(taskId) {
     const task = data.tasks.find((item) => item.id === taskId);
     if (!task) return;
+    const wasPast = task.date < todayISO();
     task.done = !task.done;
     task.completedAt = task.done ? new Date().toISOString() : '';
     saveData();
     render();
-    showToast(task.done ? '完成一件事，今天又多了一点成就感。' : '已恢复为待办。');
+    showToast(task.done
+      ? (wasPast ? `已补上 ${formatMonthDay(task.date)} 的打卡。` : '完成一件事，今天又多了一点成就感。')
+      : '已恢复为待办。');
   }
 
   function switchView(view) {
@@ -3332,6 +3511,21 @@
     const expiryId = button.dataset.expiryId;
 
     switch (action) {
+      case 'open-backup':
+        closeSidebar();
+        closeSearch();
+        setBackupStatus('');
+        showDialog(dom.backupDialog);
+        break;
+
+      case 'export-backup':
+        exportBackup();
+        break;
+
+      case 'import-backup':
+        dom.backupFileInput.click();
+        break;
+
       case 'new-task':
         closeSidebar();
         closeSearch();
@@ -3498,7 +3692,7 @@
 
   const ASSISTANT_GREETING = '你好，我是拾光助手。可以直接告诉我要做什么，例如：\n明天 10:00 写周报 @工作 #汇报\n每天 8:00 晨跑 @生活 #健康\n完成晨跑\n今天还有什么 / 打开本周\n\n我只在本机操作数据，不联网。';
 
-  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
+  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 补打卡：待补打卡 / 最近错过了什么\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 备份：打开备份 / 数据备份\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
 
   function openAssistant() {
     if (!assistantStarted) {
@@ -3836,6 +4030,16 @@
     return `本周（${formatWeekRange(start)}）共 ${tasks.length} 项，已完成 ${done} 项，完成度 ${pct}%。${lines.length ? `\n接下来：\n${lines.join('\n')}` : '\n本周事项都完成了。'}${pendingTasks.length > 5 ? `\n…还有 ${pendingTasks.length - 5} 项待办` : ''}`;
   }
 
+  function assistantMakeupSummary() {
+    const tasks = getMakeupTasks(30);
+    if (!tasks.length) return '最近 30 天没有需要补打卡的事项。';
+    const lines = tasks.slice(0, 6).map((task) => {
+      const series = taskSeries(task);
+      return `○ ${formatMonthDay(task.date)} ${task.title}${series ? ` · ${seriesRecurrenceLabel(series)}` : ' · 逾期'}`;
+    });
+    return `最近 30 天有 ${tasks.length} 项待补打卡：\n${lines.join('\n')}${tasks.length > 6 ? `\n…还有 ${tasks.length - 6} 项` : ''}\n可以在总览底部的「待补打卡」里直接点击补上。`;
+  }
+
   function completeAssistantTask(task) {
     task.done = true;
     task.completedAt = new Date().toISOString();
@@ -3913,6 +4117,21 @@
 
     if (/^(帮助|help|你能做什么|怎么用|指令|使用说明)/i.test(text)) {
       return { message: ASSISTANT_HELP };
+    }
+
+    if (/^(备份|数据备份|打开备份|导出备份)$/.test(text)) {
+      return {
+        close: true,
+        after: () => {
+          setBackupStatus('');
+          showDialog(dom.backupDialog);
+        },
+        toast: '已打开数据备份。'
+      };
+    }
+
+    if (/^(待补打卡|补打卡|最近错过了什么|错过什么)$/.test(text)) {
+      return { message: assistantMakeupSummary() };
     }
 
     if (/^(新建事项|新建一个事项|打开新建|新建任务)$/.test(text)) {
@@ -4083,6 +4302,8 @@
 
     dom.sidebarBackdrop.addEventListener('click', closeSidebar);
 
+    dom.backupFileInput.addEventListener('change', handleBackupFile);
+
     dom.taskForm.addEventListener('submit', (event) => {
       event.preventDefault();
       submitTaskForm();
@@ -4205,7 +4426,7 @@
       closeDialog(dom.confirmDialog);
     });
 
-    [dom.taskDialog, dom.categoryDialog, dom.expiryDialog, dom.confirmDialog, dom.assistantDialog].forEach((dialog) => {
+    [dom.taskDialog, dom.categoryDialog, dom.expiryDialog, dom.backupDialog, dom.confirmDialog, dom.assistantDialog].forEach((dialog) => {
       dialog.addEventListener('click', (event) => {
         if (event.target === dialog) dialog.close();
       });

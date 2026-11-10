@@ -7,7 +7,7 @@
   <meta name="description" content="拾光 · 本地个人工作台，用温柔的方式安排工作、学习、生活与购物。">
   <title>拾光 · 本地个人工作台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23F17C6D'/%3E%3Cpath d='M32 13l3.8 13.2L49 30l-13.2 3.8L32 47l-3.8-13.2L15 30l13.2-3.8z' fill='white'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=20261106a">
+  <link rel="stylesheet" href="styles.css?v=20261110a">
   <script>
     (() => {
       try {
@@ -72,7 +72,10 @@
           <span class="background-picker-label">背景</span>
           <div class="background-options" id="backgroundOptions" role="group" aria-label="选择背景颜色"></div>
         </div>
-        <div class="save-state"><span class="save-dot"></span><span>已自动保存到本机</span></div>
+        <div class="save-state">
+          <span class="save-dot"></span><span>已自动保存到本机</span>
+          <button class="footer-link" type="button" data-action="open-backup" aria-label="打开数据备份">备份</button>
+        </div>
         <div class="shortcut-legend"><span><kbd>N</kbd>新建</span><span><kbd>/</kbd>搜索</span></div>
       </div>
     </aside>
@@ -400,6 +403,40 @@
     </form>
   </dialog>
 
+  <!-- 数据备份 -->
+  <dialog class="modal" id="backupDialog" aria-labelledby="backupTitle">
+    <div class="modal-card modal-card-sm backup-dialog-card">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker">LOCAL BACKUP</p>
+          <h2 id="backupTitle">数据备份</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="backupDialog" aria-label="关闭">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+      <div class="modal-body backup-body">
+        <p class="backup-lead">导出一个包含事项、循环任务、期限记录和背景偏好的 JSON 文件。文件只保存在你自己的电脑上，不会上传。</p>
+        <div class="backup-actions">
+          <button class="btn btn-primary" type="button" data-action="export-backup">
+            <span data-icon="download"></span>导出 JSON 备份
+          </button>
+          <button class="btn btn-secondary" type="button" data-action="import-backup">
+            <span data-icon="upload"></span>导入备份
+          </button>
+        </div>
+        <input id="backupFileInput" type="file" accept=".json,application/json" hidden>
+        <p class="backup-note">导入会覆盖当前浏览器里的数据，建议先导出一份当前备份。导入成功后会自动刷新页面内容。</p>
+        <p class="backup-status" id="backupStatus" role="status" aria-live="polite"></p>
+      </div>
+      <footer class="modal-footer">
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-dialog="backupDialog">关闭</button>
+        </div>
+      </footer>
+    </div>
+  </dialog>
+
   <!-- 确认弹窗 -->
   <dialog class="modal" id="confirmDialog" aria-labelledby="confirmTitle">
     <div class="modal-card modal-card-xs">
@@ -461,6 +498,6 @@
     <span class="toast-message" id="toastMessage"></span>
   </div>
 
-  <script src="app.js?v=20261106a"></script>
+  <script src="app.js?v=20261110a"></script>
 </body>
 </html>
