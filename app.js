@@ -18,6 +18,12 @@
   ];
   const DEFAULT_BACKGROUND = BACKGROUNDS[0].id;
 
+  const WALL_RANGES = [
+    { id: 'all', label: '全部' },
+    { id: 'month', label: '本月' },
+    { id: 'year', label: '今年' }
+  ];
+
   const DIARY_WEATHER_OPTIONS = [
     { label: '晴', emoji: '☀️' },
     { label: '多云', emoji: '⛅' },
@@ -1180,6 +1186,9 @@
     selectedDate: todayISO(),
     agendaFilter: 'all',
     diaryDate: todayISO(),
+    wallCategory: 'all',
+    wallRange: 'all',
+    wallIncludeSeries: false,
     weekAnchor: startOfWeekISO(),
     calendarCursor: (() => {
       const date = new Date();
@@ -1390,11 +1399,13 @@
         ? '期限记录'
         : ui.view === 'diary'
           ? '321 日记'
-          : ui.view === 'life'
-            ? '生活打卡'
-            : ui.view === 'category'
-              ? category.name
-              : '总览';
+          : ui.view === 'wall'
+            ? '完成墙'
+            : ui.view === 'life'
+              ? '生活打卡'
+              : ui.view === 'category'
+                ? category.name
+                : '总览';
     const now = new Date();
 
     dom.topbarCrumb.textContent = crumb;
@@ -1413,6 +1424,8 @@
       dom.viewRoot.innerHTML = renderExpiryView();
     } else if (ui.view === 'diary') {
       dom.viewRoot.innerHTML = renderDiaryView();
+    } else if (ui.view === 'wall') {
+      dom.viewRoot.innerHTML = renderWallView();
     } else if (ui.view === 'life') {
       dom.viewRoot.innerHTML = renderLifeView();
     } else if (ui.view === 'category') {
@@ -2574,7 +2587,7 @@
             <div class="diary-weather-row">
               <span class="diary-weather-label">${icon('sun')}天气</span>
               <div class="diary-weather-options" role="group" aria-label="选择天气">${weatherOptions}</div>
-              <input id="diaryWeather" class="diary-weather-input" type="text" maxlength="30" value="${esc(entry?.weather || '')}" placeholder="或写一句天气…" aria-label="自定义天气">
+              <input id="diaryWeather" class="diary-weather-input" type="text" maxlength="30" value="${esc(entry?.weather || '')}" placeholder="或记录下多变的天气…" aria-label="自定义天气">
             </div>
 
             <section class="diary-section is-three" aria-labelledby="diarySectionThree">
@@ -2703,6 +2716,196 @@
     ui.diaryDate = date;
     render();
     window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  /* ----------------------------- Completion wall ----------------------------- */
+
+  function taskCompletedISO(task) {
+    if (task.completedAt) {
+      const date = new Date(task.completedAt);
+      if (!Number.isNaN(date.getTime())) return toISO(date);
+    }
+    return task.date;
+  }
+
+  function wallRangeMatch(iso, range) {
+    if (range === 'all') return true;
+    const now = new Date();
+    if (range === 'month') return iso.startsWith(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
+    if (range === 'year') return iso.startsWith(String(now.getFullYear()));
+    return true;
+  }
+
+  function wallDateLabel(iso) {
+    const date = parseISO(iso);
+    return date.getFullYear() === new Date().getFullYear()
+      ? formatMonthDay(iso)
+      : `${date.getFullYear()}年${formatMonthDay(iso)}`;
+  }
+
+  function renderWallCard(task) {
+    const category = getCategory(task.categoryId);
+    const doneDate = taskCompletedISO(task);
+    const series = taskSeries(task);
+    return `
+      <article class="wall-card" style="${categoryVars(category)}">
+        <div class="wall-card-top">
+          <span class="wall-complete-mark">${icon('check')}</span>
+          <span class="wall-card-date">${esc(wallDateLabel(doneDate))} · ${esc(weekdayName(doneDate))}</span>
+        </div>
+        <h3>${esc(task.title)}</h3>
+        ${task.note ? `<p>${esc(task.note)}</p>` : ''}
+        <div class="wall-card-tags">
+          ${series ? `<span class="wall-flag">${icon('repeat')}${esc(seriesRecurrenceLabel(series))}</span>` : ''}
+          ${renderTagChips(task.tags, 2)}
+        </div>
+        <div class="wall-card-foot">
+          <span>${esc(category.name)}</span>
+          <span>已完成</span>
+        </div>
+      </article>`;
+  }
+
+  function renderWallView() {
+    const allDone = data.tasks.filter((task) => task.done);
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+    const yearPrefix = String(now.getFullYear());
+    const stats = {
+      all: allDone.length,
+      month: allDone.filter((task) => taskCompletedISO(task).startsWith(monthPrefix)).length,
+      work: allDone.filter((task) => task.categoryId === 'work' || getCategory(task.categoryId).name === '工作').length,
+      recurring: allDone.filter((task) => task.seriesId).length
+    };
+
+    const range = WALL_RANGES.some((item) => item.id === ui.wallRange) ? ui.wallRange : 'all';
+    ui.wallRange = range;
+    const selectedCategory = ui.wallCategory === 'all' || data.categories.some((category) => category.id === ui.wallCategory)
+      ? ui.wallCategory
+      : 'all';
+    ui.wallCategory = selectedCategory;
+    const includeSeries = Boolean(ui.wallIncludeSeries);
+
+    const rangeAll = allDone.filter((task) => wallRangeMatch(taskCompletedISO(task), range));
+    const rangeVisible = rangeAll.filter((task) => includeSeries || !task.seriesId);
+    const visible = rangeVisible
+      .filter((task) => selectedCategory === 'all' || task.categoryId === selectedCategory)
+      .sort((a, b) => taskCompletedISO(b).localeCompare(taskCompletedISO(a))
+        || String(b.completedAt || '').localeCompare(String(a.completedAt || ''))
+        || a.title.localeCompare(b.title));
+    const hiddenSeriesCount = includeSeries
+      ? 0
+      : rangeAll.filter((task) => task.seriesId && (selectedCategory === 'all' || task.categoryId === selectedCategory)).length;
+
+    const categoryCounts = new Map(data.categories.map((category) => [
+      category.id,
+      rangeVisible.filter((task) => task.categoryId === category.id).length
+    ]));
+    const groups = data.categories
+      .map((category) => ({
+        category,
+        items: visible.filter((task) => task.categoryId === category.id)
+      }))
+      .filter((group) => group.items.length)
+      .sort((a, b) => {
+        const aWork = a.category.id === 'work' || a.category.name === '工作';
+        const bWork = b.category.id === 'work' || b.category.name === '工作';
+        if (aWork !== bWork) return aWork ? -1 : 1;
+        return b.items.length - a.items.length || a.category.name.localeCompare(b.category.name);
+      });
+
+    const rangeCounts = {
+      all: allDone.length,
+      month: stats.month,
+      year: allDone.filter((task) => taskCompletedISO(task).startsWith(yearPrefix)).length
+    };
+
+    const rangeTabs = `
+      <div class="filter-tabs wall-range-tabs" role="tablist" aria-label="筛选完成时间">
+        ${WALL_RANGES.map((item) => `
+          <button class="filter-tab${range === item.id ? ' is-active' : ''}" type="button" role="tab" aria-selected="${range === item.id}" data-action="set-wall-range" data-filter="${item.id}">
+            ${item.label} <span>${rangeCounts[item.id]}</span>
+          </button>`).join('')}
+      </div>`;
+
+    const categoryChips = `
+      <div class="filter-chips wall-category-chips" role="group" aria-label="按分类筛选完成墙">
+        <button class="filter-chip${selectedCategory === 'all' ? ' is-active' : ''}" type="button" aria-pressed="${selectedCategory === 'all'}" data-action="set-wall-category" data-filter="all">
+          全部 <span class="filter-number">${rangeVisible.length}</span>
+        </button>
+        ${data.categories.filter((category) => categoryCounts.get(category.id) > 0 || category.id === selectedCategory).map((category) => `
+          <button class="filter-chip${selectedCategory === category.id ? ' is-active' : ''}" type="button" aria-pressed="${selectedCategory === category.id}" data-action="set-wall-category" data-filter="${esc(category.id)}" style="${categoryVars(category)}">
+            <span class="filter-dot"></span>${esc(category.name)} <span class="filter-number">${categoryCounts.get(category.id)}</span>
+          </button>`).join('')}
+      </div>`;
+
+    const groupsHTML = groups.map((group) => `
+      <section class="wall-group" style="${categoryVars(group.category)}" aria-label="${esc(group.category.name)}完成事项">
+        <header class="wall-group-head">
+          <span class="wall-group-icon">${icon(group.category.icon)}</span>
+          <h2>${esc(group.category.name)}</h2>
+          <span class="wall-group-count">${group.items.length}</span>
+          <span class="wall-group-line" aria-hidden="true"></span>
+        </header>
+        <div class="wall-grid">${group.items.map(renderWallCard).join('')}</div>
+      </section>`).join('');
+
+    let body = '';
+    if (!allDone.length) {
+      body = `
+        <div class="wall-empty">
+          <div class="empty-art">${icon('star')}</div>
+          <h2 class="empty-title">完成墙还在等第一件事</h2>
+          <p class="empty-copy">完成一件小事后，它会自动出现在这里。先去总览看看今天想做什么。</p>
+          <button class="btn btn-primary" type="button" data-view="overview">${icon('arrowRight')}回到总览</button>
+        </div>`;
+    } else if (!visible.length) {
+      body = `
+        <div class="wall-empty">
+          <div class="empty-art">${icon('search')}</div>
+          <h2 class="empty-title">这个筛选下还没有完成事项</h2>
+          <p class="empty-copy">换一个时间范围或分类看看，或者把循环打卡打开。</p>
+          <button class="btn btn-secondary" type="button" data-action="reset-wall-filter">查看全部完成</button>
+        </div>`;
+    } else {
+      body = `<div class="wall-groups">${groupsHTML}</div>`;
+    }
+
+    return `
+      <section class="view wall-view" aria-label="完成墙">
+        <header class="page-heading">
+          <div class="page-heading-copy">
+            <p class="eyebrow">ACHIEVEMENT WALL</p>
+            <h1 class="page-title">完成墙<span class="title-mark"></span></h1>
+            <p class="page-subtitle">把完成过的事留在这里。默认只展示独立事项，循环打卡可以按需展开；工作分类会优先出现。</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" type="button" data-view="overview">${icon('arrowRight')}回到总览</button>
+          </div>
+        </header>
+
+        <section class="wall-summary" aria-label="完成概览">
+          <div class="wall-metric is-total"><span>累计完成</span><strong>${stats.all}</strong></div>
+          <div class="wall-metric is-month"><span>本月完成</span><strong>${stats.month}</strong></div>
+          <div class="wall-metric is-work"><span>工作成果</span><strong>${stats.work}</strong></div>
+          <div class="wall-metric is-repeat"><span>循环打卡</span><strong>${stats.recurring}</strong></div>
+        </section>
+
+        <div class="wall-toolbar">
+          <div class="wall-toolbar-top">
+            ${rangeTabs}
+            <button class="wall-toggle${includeSeries ? ' is-active' : ''}" type="button" data-action="toggle-wall-series" aria-pressed="${includeSeries}">
+              <span class="wall-toggle-dot" aria-hidden="true"></span>包含循环打卡
+            </button>
+          </div>
+          <div class="wall-toolbar-bottom">
+            ${categoryChips}
+            <span class="wall-toolbar-note">当前显示 ${visible.length} 项${hiddenSeriesCount ? ` · 已隐藏 ${hiddenSeriesCount} 项循环打卡` : ''}</span>
+          </div>
+        </div>
+
+        ${body}
+      </section>`;
   }
 
   /* ----------------------------- Life log ----------------------------- */
@@ -4215,6 +4418,28 @@
         render();
         break;
 
+      case 'set-wall-range':
+        ui.wallRange = WALL_RANGES.some((item) => item.id === button.dataset.filter) ? button.dataset.filter : 'all';
+        render();
+        break;
+
+      case 'set-wall-category':
+        ui.wallCategory = button.dataset.filter || 'all';
+        render();
+        break;
+
+      case 'toggle-wall-series':
+        ui.wallIncludeSeries = !ui.wallIncludeSeries;
+        render();
+        break;
+
+      case 'reset-wall-filter':
+        ui.wallRange = 'all';
+        ui.wallCategory = 'all';
+        ui.wallIncludeSeries = false;
+        render();
+        break;
+
       case 'go-expiry':
         ui.expiryFilter = 'all';
         switchView('expiry');
@@ -4356,7 +4581,7 @@
 
   const ASSISTANT_GREETING = '你好，我是拾光助手。可以直接告诉我要做什么，例如：\n明天 10:00 写周报 @工作 #汇报\n每天 8:00 晨跑 @生活 #健康\n完成晨跑\n今天洗头了 / 写日记\n今天还有什么 / 打开本周\n\n我只在本机操作数据，不联网。';
 
-  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 补打卡：待补打卡 / 最近错过了什么\n• 记录：写日记 / 打开生活打卡 / 今天洗头了\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 备份：打开备份 / 数据备份\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
+  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 补打卡：待补打卡 / 最近错过了什么\n• 记录：写日记 / 打开生活打卡 / 今天洗头了\n• 完成墙：打开完成墙 / 完成了什么\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 备份：打开备份 / 数据备份\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
 
   function openAssistant() {
     if (!assistantStarted) {
@@ -4704,6 +4929,30 @@
     return `最近 30 天有 ${tasks.length} 项待补打卡：\n${lines.join('\n')}${tasks.length > 6 ? `\n…还有 ${tasks.length - 6} 项` : ''}\n可以在总览底部的「待补打卡」里直接点击补上。`;
   }
 
+  function assistantWallSummary(scope = 'all') {
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+    const yearPrefix = String(now.getFullYear());
+    const weekStart = startOfWeekISO();
+    const weekEnd = shiftISO(weekStart, 6);
+    let done = data.tasks.filter((task) => task.done);
+    if (scope === 'week') done = done.filter((task) => {
+      const iso = taskCompletedISO(task);
+      return iso >= weekStart && iso <= weekEnd;
+    });
+    if (scope === 'month') done = done.filter((task) => taskCompletedISO(task).startsWith(monthPrefix));
+    if (scope === 'year') done = done.filter((task) => taskCompletedISO(task).startsWith(yearPrefix));
+    if (!done.length) return '这个范围里还没有完成记录。完成一件事后，它会自动出现在完成墙。';
+    const work = done.filter((task) => task.categoryId === 'work' || getCategory(task.categoryId).name === '工作').length;
+    const recurring = done.filter((task) => task.seriesId).length;
+    const recent = [...done]
+      .sort((a, b) => taskCompletedISO(b).localeCompare(taskCompletedISO(a)))
+      .slice(0, 5);
+    const lines = recent.map((task) => `✓ ${wallDateLabel(taskCompletedISO(task))} ${task.title}${task.seriesId ? ' · 循环' : ''}`);
+    const label = scope === 'week' ? '本周' : scope === 'month' ? '本月' : scope === 'year' ? '今年' : '累计';
+    return `${label}完成 ${done.length} 项，其中工作 ${work} 项、循环打卡 ${recurring} 项。\n最近完成：\n${lines.join('\n')}${done.length > 5 ? `\n…还有 ${done.length - 5} 项` : ''}`;
+  }
+
   function completeAssistantTask(task) {
     task.done = true;
     task.completedAt = new Date().toISOString();
@@ -4798,6 +5047,15 @@
       return { message: assistantMakeupSummary() };
     }
 
+    if (/^(完成墙|成果墙|成就墙|看看完成墙|打开完成墙)$/.test(text)) {
+      return { close: true, after: () => switchView('wall'), toast: '已打开完成墙。' };
+    }
+
+    if (/^(完成了什么|最近完成了什么|这周完成了什么|本周完成了什么|本月完成了什么|今年完成了什么)$/.test(text)) {
+      const scope = text.includes('本周') || text.includes('这周') ? 'week' : text.includes('本月') ? 'month' : text.includes('今年') ? 'year' : 'all';
+      return { message: assistantWallSummary(scope) };
+    }
+
     if (/^(新建事项|新建一个事项|打开新建|新建任务)$/.test(text)) {
       return {
         close: true,
@@ -4837,6 +5095,9 @@
       }
       if (['生活打卡', '生活记录', '生活小事'].includes(target)) {
         return { close: true, after: () => switchView('life'), toast: '已打开生活打卡。' };
+      }
+      if (['完成墙', '成果墙', '成就墙'].includes(target)) {
+        return { close: true, after: () => switchView('wall'), toast: '已打开完成墙。' };
       }
       const category = findAssistantCategory(target);
       if (category) {
@@ -4983,7 +5244,7 @@
       const navButton = target.closest('[data-view]');
       if (navButton) {
         const view = navButton.dataset.view;
-        if (['overview', 'week', 'expiry', 'diary', 'life'].includes(view)) switchView(view);
+        if (['overview', 'week', 'expiry', 'diary', 'wall', 'life'].includes(view)) switchView(view);
         return;
       }
 
