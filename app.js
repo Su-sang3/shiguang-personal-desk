@@ -18,6 +18,23 @@
   ];
   const DEFAULT_BACKGROUND = BACKGROUNDS[0].id;
 
+  const DIARY_WEATHER_OPTIONS = [
+    { label: '晴', emoji: '☀️' },
+    { label: '多云', emoji: '⛅' },
+    { label: '阴', emoji: '☁️' },
+    { label: '雨', emoji: '🌧️' },
+    { label: '雪', emoji: '❄️' }
+  ];
+
+  const LIFE_LOG_PRESETS = [
+    { id: 'hair', label: '洗头', emoji: '🫧', color: '#5AA6C9' },
+    { id: 'shower', label: '洗澡', emoji: '🚿', color: '#5B82E8' },
+    { id: 'nails', label: '剪指甲', emoji: '✂️', color: '#D989A7' },
+    { id: 'sheets', label: '换床单', emoji: '🛏️', color: '#63A98C' },
+    { id: 'exercise', label: '运动', emoji: '🏃', color: '#F0786F' },
+    { id: 'mask', label: '面膜', emoji: '🧴', color: '#8A7ED9' }
+  ];
+
   const CATEGORY_COLORS = [
     '#557FE8',
     '#F0786F',
@@ -666,6 +683,28 @@
     return haystack.includes(query.toLowerCase());
   }
 
+  function diaryMatchesQuery(entry, query) {
+    const haystack = [
+      entry.date,
+      formatMonthDay(entry.date),
+      entry.weather,
+      ...entry.happy,
+      ...entry.improvements,
+      entry.affirmation
+    ].join(' ').toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  }
+
+  function lifeLogMatchesQuery(log, query) {
+    const haystack = [
+      log.label,
+      log.note,
+      log.date,
+      formatMonthDay(log.date)
+    ].join(' ').toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  }
+
   /* ----------------------------- Seed data ----------------------------- */
 
   function createSeedData() {
@@ -819,7 +858,61 @@
       }
     ];
 
-    return { version: 4, categories, tasks, series, expiries: [] };
+    return { version: 5, categories, tasks, series, expiries: [], diaryEntries: [], lifeLogs: [], trackers: [] };
+  }
+
+  function normalizeDiaryFields(value, max) {
+    const list = Array.isArray(value) ? value : [];
+    return Array.from({ length: max }, (_, index) => String(list[index] || '').trim().slice(0, 200));
+  }
+
+  function normalizeDiaryEntries(raw) {
+    const now = new Date().toISOString();
+    const byDate = new Map();
+    (Array.isArray(raw) ? raw : []).forEach((item) => {
+      if (!item || !isISODate(item.date)) return;
+      const happy = normalizeDiaryFields(item.happy, 3);
+      const improvements = normalizeDiaryFields(item.improvements, 2);
+      const affirmation = String(item.affirmation || '').trim().slice(0, 300);
+      const weather = String(item.weather || '').trim().slice(0, 30);
+      if (!happy.some(Boolean) && !improvements.some(Boolean) && !affirmation && !weather) return;
+      const entry = {
+        id: String(item.id || `diary_${item.date}`),
+        date: item.date,
+        weather,
+        happy,
+        improvements,
+        affirmation,
+        createdAt: item.createdAt || now,
+        updatedAt: item.updatedAt || item.createdAt || now
+      };
+      const existing = byDate.get(entry.date);
+      if (!existing || entry.updatedAt >= existing.updatedAt) byDate.set(entry.date, entry);
+    });
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  function normalizeLifeLogs(raw) {
+    const now = new Date().toISOString();
+    const usedIds = new Set();
+    return (Array.isArray(raw) ? raw : [])
+      .filter((item) => item && String(item.label || '').trim() && isISODate(item.date))
+      .map((item, index) => {
+        let id = String(item.id || `life_${index}`);
+        if (!id || usedIds.has(id)) id = uid('life');
+        usedIds.add(id);
+        return {
+          id,
+          type: String(item.type || 'custom').slice(0, 30),
+          label: String(item.label).trim().slice(0, 20),
+          date: item.date,
+          note: String(item.note || '').trim().slice(0, 200),
+          createdAt: item.createdAt || now
+        };
+      })
+      .sort((a, b) => b.date.localeCompare(a.date)
+        || b.createdAt.localeCompare(a.createdAt)
+        || a.label.localeCompare(b.label));
   }
 
   function normalizeData(raw) {
@@ -943,7 +1036,11 @@
         };
       });
 
-    return { version: 4, categories, tasks, series, expiries };
+    const diaryEntries = normalizeDiaryEntries(raw.diaryEntries);
+    const lifeLogs = normalizeLifeLogs(raw.lifeLogs);
+    const trackers = Array.isArray(raw.trackers) ? raw.trackers : [];
+
+    return { version: 5, categories, tasks, series, expiries, diaryEntries, lifeLogs, trackers };
   }
 
   function loadData() {
@@ -1082,6 +1179,7 @@
     categoryId: null,
     selectedDate: todayISO(),
     agendaFilter: 'all',
+    diaryDate: todayISO(),
     weekAnchor: startOfWeekISO(),
     calendarCursor: (() => {
       const date = new Date();
@@ -1183,6 +1281,13 @@
     backupDialog: document.getElementById('backupDialog'),
     backupFileInput: document.getElementById('backupFileInput'),
     backupStatus: document.getElementById('backupStatus'),
+    lifeLogDialog: document.getElementById('lifeLogDialog'),
+    lifeLogForm: document.getElementById('lifeLogForm'),
+    lifeLogType: document.getElementById('lifeLogType'),
+    lifeLogLabel: document.getElementById('lifeLogLabel'),
+    lifeLogDate: document.getElementById('lifeLogDate'),
+    lifeLogNote: document.getElementById('lifeLogNote'),
+    lifeLogError: document.getElementById('lifeLogError'),
     toast: document.getElementById('toast'),
     toastIcon: document.getElementById('toastIcon'),
     toastMessage: document.getElementById('toastMessage')
@@ -1283,9 +1388,13 @@
       ? '本周时间线'
       : ui.view === 'expiry'
         ? '期限记录'
-        : ui.view === 'category'
-          ? category.name
-          : '总览';
+        : ui.view === 'diary'
+          ? '321 日记'
+          : ui.view === 'life'
+            ? '生活打卡'
+            : ui.view === 'category'
+              ? category.name
+              : '总览';
     const now = new Date();
 
     dom.topbarCrumb.textContent = crumb;
@@ -1302,6 +1411,10 @@
       dom.viewRoot.innerHTML = renderWeekView();
     } else if (ui.view === 'expiry') {
       dom.viewRoot.innerHTML = renderExpiryView();
+    } else if (ui.view === 'diary') {
+      dom.viewRoot.innerHTML = renderDiaryView();
+    } else if (ui.view === 'life') {
+      dom.viewRoot.innerHTML = renderLifeView();
     } else if (ui.view === 'category') {
       dom.viewRoot.innerHTML = renderCategoryView();
     } else {
@@ -2364,6 +2477,457 @@
       </article>`;
   }
 
+  /* ----------------------------- 321 diary ----------------------------- */
+
+  function getDiaryEntry(date = ui.diaryDate) {
+    return (data.diaryEntries || []).find((entry) => entry.date === date) || null;
+  }
+
+  function diaryWeatherCopy(weather) {
+    if (!weather) return '';
+    const option = DIARY_WEATHER_OPTIONS.find((item) => weather.includes(item.label));
+    return option ? `${option.emoji} ${weather}` : weather;
+  }
+
+  function renderDiaryView() {
+    const today = todayISO();
+    const entry = getDiaryEntry();
+    const isToday = ui.diaryDate === today;
+    const date = parseISO(ui.diaryDate);
+    const recentEntries = [...(data.diaryEntries || [])]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8);
+    const monthPrefix = `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+    const monthCount = (data.diaryEntries || []).filter((item) => item.date.startsWith(monthPrefix)).length;
+    const filledCount = entry
+      ? entry.happy.filter(Boolean).length + entry.improvements.filter(Boolean).length + (entry.affirmation ? 1 : 0)
+      : 0;
+
+    const happyFields = Array.from({ length: 3 }, (_, index) => `
+      <label class="diary-field">
+        <span class="diary-field-number">${index + 1}</span>
+        <textarea id="diaryHappy${index}" rows="2" maxlength="200" aria-label="开心的小事 ${index + 1}" placeholder="一件很小但让你嘴角上扬的事…">${esc(entry?.happy?.[index] || '')}</textarea>
+      </label>`).join('');
+
+    const improvementFields = Array.from({ length: 2 }, (_, index) => `
+      <label class="diary-field">
+        <span class="diary-field-number is-blue">${index + 1}</span>
+        <textarea id="diaryImprovement${index}" rows="2" maxlength="200" aria-label="可以改进的事 ${index + 1}" placeholder="不用苛责，只是下次可以更好一点…">${esc(entry?.improvements?.[index] || '')}</textarea>
+      </label>`).join('');
+
+    const weatherOptions = DIARY_WEATHER_OPTIONS.map((option) => {
+      const active = entry?.weather === option.label;
+      return `<button class="diary-weather-chip${active ? ' is-active' : ''}" type="button" data-action="set-diary-weather" data-weather="${option.label}" aria-pressed="${active}"><span aria-hidden="true">${option.emoji}</span>${option.label}</button>`;
+    }).join('');
+
+    const recentHTML = recentEntries.length
+      ? recentEntries.map((item) => {
+        const preview = item.happy.find(Boolean) || item.affirmation || item.improvements.find(Boolean) || '这篇日记还很安静';
+        const count = item.happy.filter(Boolean).length + item.improvements.filter(Boolean).length + (item.affirmation ? 1 : 0);
+        return `
+          <button class="diary-recent-item${item.date === ui.diaryDate ? ' is-active' : ''}" type="button" data-action="open-diary-date" data-date="${item.date}">
+            <span class="diary-recent-date"><strong>${formatShortNumeric(item.date)}</strong><span>${weekdayName(item.date)}</span></span>
+            <span class="diary-recent-copy">
+              <span class="diary-recent-weather">${esc(item.weather || '未记天气')}</span>
+              <strong>${esc(preview)}</strong>
+              <span>${count} 条记录${item.affirmation ? ' · 有自我肯定' : ''}</span>
+            </span>
+          </button>`;
+      }).join('')
+      : `<div class="diary-recent-empty">
+          <span class="diary-recent-empty-icon">${icon('sparkles')}</span>
+          <strong>还没有日记</strong>
+          <span>从今天开始，写下三件小小的开心事。</span>
+        </div>`;
+
+    return `
+      <section class="view diary-view" aria-label="321 日记">
+        <header class="page-heading diary-page-heading">
+          <div class="page-heading-copy">
+            <p class="eyebrow">THREE · TWO · ONE</p>
+            <h1 class="page-title">321 日记<span class="title-mark"></span></h1>
+            <p class="page-subtitle">三件开心的小事，两件可以改进的事，一句积极的自我肯定。每天一点点，慢慢看见自己。</p>
+          </div>
+          <div class="page-actions diary-date-actions">
+            <div class="diary-date-switcher" aria-label="切换日记日期">
+              <button class="icon-btn" type="button" data-action="diary-prev" aria-label="前一天">${icon('chevronLeft')}</button>
+              <input id="diaryDateInput" type="date" value="${ui.diaryDate}" max="${today}" aria-label="选择日记日期">
+              <button class="icon-btn" type="button" data-action="diary-next" aria-label="后一天">${icon('chevronRight')}</button>
+            </div>
+            <button class="btn btn-secondary diary-today-btn" type="button" data-action="diary-today">${icon('target')}今天</button>
+          </div>
+        </header>
+
+        <div class="diary-layout">
+          <form class="diary-card" id="diaryForm" novalidate>
+            <div class="diary-card-top">
+              <div class="diary-date-copy">
+                <span class="diary-date-badge">${date.getDate()}</span>
+                <div>
+                  <strong>${formatMonthDay(ui.diaryDate)}</strong>
+                  <span>${weekdayName(ui.diaryDate)}${isToday ? ' · 今天' : ''}</span>
+                </div>
+              </div>
+              <span class="diary-save-status" id="diarySaveStatus">${entry ? '已保存到本机' : '写完后会保存在本机'}</span>
+            </div>
+
+            <div class="diary-weather-row">
+              <span class="diary-weather-label">${icon('sun')}天气</span>
+              <div class="diary-weather-options" role="group" aria-label="选择天气">${weatherOptions}</div>
+              <input id="diaryWeather" class="diary-weather-input" type="text" maxlength="30" value="${esc(entry?.weather || '')}" placeholder="或写一句天气…" aria-label="自定义天气">
+            </div>
+
+            <section class="diary-section is-three" aria-labelledby="diarySectionThree">
+              <div class="diary-section-head">
+                <span class="diary-number-badge is-three">3</span>
+                <div>
+                  <h2 id="diarySectionThree">开心的小事</h2>
+                  <p>今天值得收藏的瞬间</p>
+                </div>
+              </div>
+              <div class="diary-fields">${happyFields}</div>
+            </section>
+
+            <section class="diary-section is-two" aria-labelledby="diarySectionTwo">
+              <div class="diary-section-head">
+                <span class="diary-number-badge is-two">2</span>
+                <div>
+                  <h2 id="diarySectionTwo">可以改进的事</h2>
+                  <p>温柔地看见，下一次做得更好</p>
+                </div>
+              </div>
+              <div class="diary-fields">${improvementFields}</div>
+            </section>
+
+            <section class="diary-section is-one" aria-labelledby="diarySectionOne">
+              <div class="diary-section-head">
+                <span class="diary-number-badge is-one">1</span>
+                <div>
+                  <h2 id="diarySectionOne">积极的自我肯定</h2>
+                  <p>对自己说一句温柔而有力的话</p>
+                </div>
+              </div>
+              <label class="diary-field diary-field-affirmation">
+                <span class="diary-field-number is-pink">1</span>
+                <textarea id="diaryAffirmation" rows="2" maxlength="300" aria-label="积极的自我肯定" placeholder="我已经做得很好了，今天也值得被好好对待。">${esc(entry?.affirmation || '')}</textarea>
+              </label>
+            </section>
+
+            <div class="diary-card-actions">
+              <span class="diary-card-hint">${icon('info')}${filledCount ? `已写 ${filledCount} 格 · ` : ''}内容只保存在本机</span>
+              <button class="btn btn-primary" type="submit">${icon('check')}保存这篇日记</button>
+            </div>
+          </form>
+
+          <aside class="diary-recent" aria-label="最近日记">
+            <div class="diary-recent-head">
+              <div>
+                <p class="eyebrow">RECENT PAGES</p>
+                <h2>最近日记</h2>
+              </div>
+              <span class="diary-recent-count">本月 ${monthCount} 篇</span>
+            </div>
+            <div class="diary-recent-list">${recentHTML}</div>
+          </aside>
+        </div>
+      </section>`;
+  }
+
+  function readDiaryValues() {
+    const form = document.getElementById('diaryForm');
+    if (!form) return null;
+    const happy = Array.from({ length: 3 }, (_, index) => String(document.getElementById(`diaryHappy${index}`)?.value || '').trim());
+    const improvements = Array.from({ length: 2 }, (_, index) => String(document.getElementById(`diaryImprovement${index}`)?.value || '').trim());
+    return {
+      weather: String(document.getElementById('diaryWeather')?.value || '').trim(),
+      happy,
+      improvements,
+      affirmation: String(document.getElementById('diaryAffirmation')?.value || '').trim()
+    };
+  }
+
+  function saveDiaryEntry({ silent = false, rerender = false } = {}) {
+    const values = readDiaryValues();
+    if (!values) return false;
+    const entries = data.diaryEntries || (data.diaryEntries = []);
+    const existingIndex = entries.findIndex((entry) => entry.date === ui.diaryDate);
+    const hasContent = Boolean(values.weather || values.happy.some(Boolean) || values.improvements.some(Boolean) || values.affirmation);
+
+    if (!hasContent) {
+      if (existingIndex >= 0) {
+        entries.splice(existingIndex, 1);
+        saveData();
+        if (rerender) render();
+        if (!silent) showToast('已清空这篇日记。');
+      } else if (!silent) {
+        showToast('还没有写内容，先写一句也可以。');
+      }
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    const previous = existingIndex >= 0 ? entries[existingIndex] : null;
+    const entry = {
+      id: previous?.id || uid('diary'),
+      date: ui.diaryDate,
+      weather: values.weather.slice(0, 30),
+      happy: values.happy.slice(0, 3),
+      improvements: values.improvements.slice(0, 2),
+      affirmation: values.affirmation.slice(0, 300),
+      createdAt: previous?.createdAt || now,
+      updatedAt: now
+    };
+    if (existingIndex >= 0) entries[existingIndex] = entry;
+    else entries.push(entry);
+    data.diaryEntries = entries.sort((a, b) => b.date.localeCompare(a.date));
+    saveData();
+    const status = document.getElementById('diarySaveStatus');
+    if (status) status.textContent = '已保存到本机';
+    if (rerender) render();
+    if (!silent) showToast('日记已保存。');
+    return true;
+  }
+
+  function changeDiaryDate(date) {
+    const input = document.getElementById('diaryDateInput');
+    if (!isISODate(date)) {
+      if (input) input.value = ui.diaryDate;
+      return;
+    }
+    if (date > todayISO()) {
+      if (input) input.value = ui.diaryDate;
+      showToast('日记日期不能超过今天。');
+      return;
+    }
+    saveDiaryEntry({ silent: true, rerender: false });
+    ui.diaryDate = date;
+    render();
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  /* ----------------------------- Life log ----------------------------- */
+
+  function getLifePreset(type) {
+    return LIFE_LOG_PRESETS.find((preset) => preset.id === type) || null;
+  }
+
+  function lifeLogsForPreset(preset) {
+    return (data.lifeLogs || [])
+      .filter((log) => log.type === preset.id || log.label === preset.label)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  }
+
+  function lifeLogEmoji(log) {
+    return getLifePreset(log.type)?.emoji || '✏️';
+  }
+
+  function renderLifePresetCard(preset) {
+    const today = todayISO();
+    const logs = lifeLogsForPreset(preset);
+    const last = logs[0] || null;
+    const lastToday = last?.date === today;
+    const daysAgo = last ? Math.max(0, diffDays(today, last.date)) : null;
+    const lastCopy = !last
+      ? '还没有记录'
+      : lastToday
+        ? '今天已经记过了'
+        : daysAgo === 1
+          ? '上次是昨天'
+          : `上次 ${formatMonthDay(last.date)} · ${daysAgo} 天前`;
+
+    return `
+      <article class="life-preset-card${lastToday ? ' is-done' : ''}" style="--life-color:${preset.color}">
+        <div class="life-preset-top">
+          <span class="life-preset-emoji" aria-hidden="true">${preset.emoji}</span>
+          <span class="life-preset-state">${lastToday ? '今天已打卡' : last ? `${daysAgo} 天前` : '还没记录'}</span>
+        </div>
+        <h3>${esc(preset.label)}</h3>
+        <p>${esc(lastCopy)}</p>
+        <div class="life-preset-actions">
+          <button class="life-log-btn" type="button" data-action="log-life" data-type="${preset.id}" ${lastToday ? 'disabled' : ''}>
+            ${lastToday ? icon('check') : icon('plus')}${lastToday ? '今天已打卡' : '今天做了'}
+          </button>
+          <button class="life-backfill-btn" type="button" data-action="open-life-log" data-type="${preset.id}" data-label="${esc(preset.label)}">补记</button>
+        </div>
+      </article>`;
+  }
+
+  function renderLifeLogRow(log) {
+    const preset = getLifePreset(log.type);
+    const emoji = preset?.emoji || '✏️';
+    return `
+      <div class="life-log-row" style="--life-color:${preset?.color || '#9aa8bd'}">
+        <span class="life-log-date"><strong>${formatShortNumeric(log.date)}</strong><span>${weekdayName(log.date)}</span></span>
+        <span class="life-log-emoji" aria-hidden="true">${emoji}</span>
+        <span class="life-log-copy">
+          <strong>${esc(log.label)}</strong>
+          <span>${log.note ? esc(log.note) : '轻轻记下一件照顾自己的小事'}</span>
+        </span>
+        <button class="card-mini-btn is-danger" type="button" data-action="delete-life-log" data-life-id="${esc(log.id)}" aria-label="删除记录：${esc(log.label)}" title="删除">${icon('trash')}</button>
+      </div>`;
+  }
+
+  function renderLifeView() {
+    const logs = [...(data.lifeLogs || [])]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 30);
+    const historyHTML = logs.length
+      ? `<div class="life-log-list">${logs.map(renderLifeLogRow).join('')}</div>`
+      : `<div class="life-empty">
+          <div class="empty-art">${icon('coffee')}</div>
+          <h3 class="empty-title">还没有生活记录</h3>
+          <p class="empty-copy">洗头、洗澡、换床单……照顾自己的小事，也值得被认真记下来。</p>
+          <button class="btn btn-primary" type="button" data-action="log-life" data-type="hair">${icon('plus')}记下今天洗头</button>
+        </div>`;
+
+    return `
+      <section class="view life-view" aria-label="生活打卡">
+        <header class="page-heading">
+          <div class="page-heading-copy">
+            <p class="eyebrow">LITTLE THINGS</p>
+            <h1 class="page-title">生活打卡<span class="title-mark"></span></h1>
+            <p class="page-subtitle">把洗头、洗澡、换床单这些照顾自己的小事记下来。不是为了打卡而打卡，只是让生活留下一点温柔的痕迹。</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-primary" type="button" data-action="open-life-log" data-type="custom" data-label="">${icon('plus')}自定义记录</button>
+          </div>
+        </header>
+
+        <section class="life-quick" aria-label="快捷打卡">
+          <div class="life-section-head">
+            <div>
+              <h2>快捷打卡</h2>
+              <p>点一下，记下今天做过的小事</p>
+            </div>
+            <span>${LIFE_LOG_PRESETS.length} 个常用</span>
+          </div>
+          <div class="life-grid">${LIFE_LOG_PRESETS.map(renderLifePresetCard).join('')}</div>
+        </section>
+
+        <section class="life-history" aria-label="最近记录">
+          <div class="life-section-head">
+            <div>
+              <h2>最近记录</h2>
+              <p>最近的 ${logs.length} 条生活小事</p>
+            </div>
+            <span>${logs.length ? '按日期倒序' : '从一件小事开始'}</span>
+          </div>
+          ${historyHTML}
+        </section>
+      </section>`;
+  }
+
+  function logLifePreset(type) {
+    const preset = getLifePreset(type);
+    if (!preset) return;
+    const today = todayISO();
+    const exists = (data.lifeLogs || []).some((log) => log.date === today && (log.type === preset.id || log.label === preset.label));
+    if (exists) {
+      showToast(`今天已经记过「${preset.label}」了。`);
+      return;
+    }
+    data.lifeLogs = data.lifeLogs || [];
+    data.lifeLogs.push({
+      id: uid('life'),
+      type: preset.id,
+      label: preset.label,
+      date: today,
+      note: '',
+      createdAt: new Date().toISOString()
+    });
+    data.lifeLogs = normalizeLifeLogs(data.lifeLogs);
+    saveData();
+    render();
+    showToast(`已记下：今天${preset.label}。`);
+  }
+
+  function openLifeLogDialog({ type = 'custom', label = '', date = todayISO() } = {}) {
+    const preset = getLifePreset(type);
+    dom.lifeLogType.value = preset ? preset.id : 'custom';
+    dom.lifeLogLabel.value = preset ? preset.label : label;
+    dom.lifeLogLabel.readOnly = Boolean(preset);
+    dom.lifeLogDate.value = isISODate(date) ? date : todayISO();
+    dom.lifeLogDate.max = todayISO();
+    dom.lifeLogNote.value = '';
+    dom.lifeLogError.textContent = '';
+    dom.lifeLogError.classList.remove('is-visible');
+    dom.lifeLogLabel.classList.remove('is-invalid');
+    dom.lifeLogDate.classList.remove('is-invalid');
+    dom.lifeLogDialog.querySelector('#lifeLogTitle').textContent = preset ? `补记：${preset.label}` : '自定义记录';
+    showDialog(dom.lifeLogDialog);
+    window.setTimeout(() => {
+      if (preset) dom.lifeLogDate.focus();
+      else dom.lifeLogLabel.focus();
+    }, 80);
+  }
+
+  function submitLifeLogForm() {
+    const type = dom.lifeLogType.value || 'custom';
+    const preset = getLifePreset(type);
+    const label = String(dom.lifeLogLabel.value || '').trim().slice(0, 20);
+    const date = dom.lifeLogDate.value;
+    const note = String(dom.lifeLogNote.value || '').trim().slice(0, 200);
+
+    dom.lifeLogError.textContent = '';
+    dom.lifeLogError.classList.remove('is-visible');
+    dom.lifeLogLabel.classList.remove('is-invalid');
+    dom.lifeLogDate.classList.remove('is-invalid');
+
+    if (!label) {
+      dom.lifeLogError.textContent = '写一下做了什么，比如「洗头」。';
+      dom.lifeLogError.classList.add('is-visible');
+      dom.lifeLogLabel.classList.add('is-invalid');
+      dom.lifeLogLabel.focus();
+      return;
+    }
+    if (!isISODate(date) || date > todayISO()) {
+      dom.lifeLogError.textContent = '日期不能是未来，请选择今天或更早的日期。';
+      dom.lifeLogError.classList.add('is-visible');
+      dom.lifeLogDate.classList.add('is-invalid');
+      dom.lifeLogDate.focus();
+      return;
+    }
+    if (preset && (data.lifeLogs || []).some((log) => log.date === date && (log.type === preset.id || log.label === preset.label))) {
+      dom.lifeLogError.textContent = `这一天已经记过「${preset.label}」了。`;
+      dom.lifeLogError.classList.add('is-visible');
+      dom.lifeLogDate.classList.add('is-invalid');
+      dom.lifeLogDate.focus();
+      return;
+    }
+
+    data.lifeLogs = data.lifeLogs || [];
+    data.lifeLogs.push({
+      id: uid('life'),
+      type: preset ? preset.id : 'custom',
+      label,
+      date,
+      note,
+      createdAt: new Date().toISOString()
+    });
+    data.lifeLogs = normalizeLifeLogs(data.lifeLogs);
+    saveData();
+    closeDialog(dom.lifeLogDialog);
+    if (ui.view !== 'life') switchView('life');
+    else render();
+    showToast(`已记下：${label} · ${formatMonthDay(date)}。`);
+  }
+
+  function requestDeleteLifeLog(id) {
+    const log = (data.lifeLogs || []).find((item) => item.id === id);
+    if (!log) return;
+    showConfirm({
+      title: '删除这条生活记录？',
+      message: `「${log.label} · ${formatMonthDay(log.date)}」会从生活打卡中移除。`,
+      confirmLabel: '删除记录',
+      onConfirm: () => {
+        data.lifeLogs = (data.lifeLogs || []).filter((item) => item.id !== id);
+        saveData();
+        render();
+        showToast('生活记录已删除。');
+      }
+    });
+  }
+
   function renderTaskTile(task) {
     const category = getCategory(task.categoryId);
     const deadline = getDeadlineInfo(task);
@@ -2422,7 +2986,15 @@
       .filter((record) => expiryMatchesQuery(record, normalized))
       .sort(compareExpiryRecords);
     const visibleExpiries = expiryMatches.slice(0, 4);
-    const totalCount = matches.length + expiryMatches.length;
+    const diaryMatches = (data.diaryEntries || [])
+      .filter((entry) => diaryMatchesQuery(entry, normalized))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const visibleDiaries = diaryMatches.slice(0, 4);
+    const lifeMatches = (data.lifeLogs || [])
+      .filter((log) => lifeLogMatchesQuery(log, normalized))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    const visibleLifeLogs = lifeMatches.slice(0, 4);
+    const totalCount = matches.length + expiryMatches.length + diaryMatches.length + lifeMatches.length;
 
     const items = visible.map((task) => {
       const category = getCategory(task.categoryId);
@@ -2466,9 +3038,44 @@
         </button>`;
     }).join('');
 
+    const diaryItems = visibleDiaries.map((entry) => {
+      const preview = entry.happy.find(Boolean) || entry.affirmation || entry.improvements.find(Boolean) || '321 日记';
+      return `
+        <button class="search-result diary-search-result" type="button" data-search-diary-date="${entry.date}">
+          <span class="search-result-icon">${icon('book')}</span>
+          <span class="search-result-copy">
+            <span class="search-result-title">${highlightMatch(preview, normalized)}</span>
+            <span class="search-result-meta">
+              <span>321 日记</span>
+              <span class="dot"></span>
+              <span>${formatMonthDay(entry.date)}</span>
+              ${entry.weather ? `<span class="dot"></span><span>${esc(entry.weather)}</span>` : ''}
+            </span>
+          </span>
+          <span class="search-result-date">${weekdayName(entry.date)}</span>
+        </button>`;
+    }).join('');
+
+    const lifeItems = visibleLifeLogs.map((log) => `
+      <button class="search-result life-search-result" type="button" data-search-life-id="${esc(log.id)}">
+        <span class="search-result-icon life-search-emoji" aria-hidden="true">${lifeLogEmoji(log)}</span>
+        <span class="search-result-copy">
+          <span class="search-result-title">${highlightMatch(log.label, normalized)}</span>
+          <span class="search-result-meta">
+            <span>生活打卡</span>
+            <span class="dot"></span>
+            <span>${formatMonthDay(log.date)}</span>
+            ${log.note ? `<span class="dot"></span><span>${highlightMatch(log.note, normalized)}</span>` : ''}
+          </span>
+        </span>
+        <span class="search-result-date">${weekdayName(log.date)}</span>
+      </button>`).join('');
+
     const moreNotes = [];
     if (matches.length > 8) moreNotes.push(`还有 ${matches.length - 8} 个事项`);
     if (expiryMatches.length > 4) moreNotes.push(`还有 ${expiryMatches.length - 4} 条期限记录`);
+    if (diaryMatches.length > 4) moreNotes.push(`还有 ${diaryMatches.length - 4} 篇日记`);
+    if (lifeMatches.length > 4) moreNotes.push(`还有 ${lifeMatches.length - 4} 条生活记录`);
 
     dom.searchResults.innerHTML = `
       <div class="search-results-head"><span>${totalCount ? `找到 ${totalCount} 个结果` : '搜索结果'}</span><span><kbd>Esc</kbd> 关闭</span></div>
@@ -2477,10 +3084,16 @@
         ${expiryMatches.length ? `
           <div class="search-group-label"><span>期限记录</span><span>${expiryMatches.length}</span></div>
           ${expiryItems}` : ''}
+        ${diaryMatches.length ? `
+          <div class="search-group-label"><span>321 日记</span><span>${diaryMatches.length}</span></div>
+          ${diaryItems}` : ''}
+        ${lifeMatches.length ? `
+          <div class="search-group-label"><span>生活打卡</span><span>${lifeMatches.length}</span></div>
+          ${lifeItems}` : ''}
       ` : `
         <div class="search-empty">
           <span class="search-empty-icon">${icon('search')}</span>
-          没有找到「${esc(query.trim())}」<br>试试事项名称、期限记录、分类或备注里的关键词。
+          没有找到「${esc(query.trim())}」<br>试试事项、期限、日记或生活记录里的关键词。
         </div>`}
       ${moreNotes.length ? `<div class="search-more">${moreNotes.join('，')}，换一个更准确的关键词试试。</div>` : ''}
     `;
@@ -2591,7 +3204,7 @@
       const normalized = normalizeData(rawData);
       if (!normalized) throw new Error('备份数据不完整');
 
-      const countsText = `${normalized.tasks.length} 个事项、${normalized.series.length} 个循环系列、${normalized.expiries.length} 条期限记录`;
+      const countsText = `${normalized.tasks.length} 个事项、${normalized.series.length} 个循环系列、${normalized.expiries.length} 条期限记录、${normalized.diaryEntries.length} 篇日记、${normalized.lifeLogs.length} 条生活记录`;
       setBackupStatus(`已读取备份：${countsText}。请确认是否覆盖当前数据。`);
       showConfirm({
         title: '覆盖导入这份备份？',
@@ -3477,6 +4090,7 @@
   }
 
   function switchView(view) {
+    if (ui.view === 'diary' && view !== 'diary') saveDiaryEntry({ silent: true, rerender: false });
     ui.view = view;
     closeSidebar();
     closeSearch();
@@ -3493,6 +4107,7 @@
 
   function openCategory(categoryId) {
     if (!data.categories.some((category) => category.id === categoryId)) return;
+    if (ui.view === 'diary') saveDiaryEntry({ silent: true, rerender: false });
     ui.view = 'category';
     ui.categoryId = categoryId;
     ui.categoryFilter = 'all';
@@ -3509,8 +4124,57 @@
     const taskId = button.dataset.taskId;
     const categoryId = button.dataset.categoryId;
     const expiryId = button.dataset.expiryId;
+    const lifeId = button.dataset.lifeId;
 
     switch (action) {
+      case 'diary-prev':
+        changeDiaryDate(shiftISO(ui.diaryDate, -1));
+        break;
+
+      case 'diary-next': {
+        const next = shiftISO(ui.diaryDate, 1);
+        if (next > todayISO()) showToast('已经到今天啦。');
+        else changeDiaryDate(next);
+        break;
+      }
+
+      case 'diary-today':
+        changeDiaryDate(todayISO());
+        break;
+
+      case 'open-diary-date':
+        if (date) changeDiaryDate(date);
+        break;
+
+      case 'set-diary-weather': {
+        const weatherInput = document.getElementById('diaryWeather');
+        if (!weatherInput) break;
+        weatherInput.value = button.dataset.weather || '';
+        document.querySelectorAll('[data-action="set-diary-weather"]').forEach((chip) => {
+          const active = chip === button;
+          chip.classList.toggle('is-active', active);
+          chip.setAttribute('aria-pressed', String(active));
+        });
+        saveDiaryEntry({ silent: true, rerender: false });
+        break;
+      }
+
+      case 'log-life':
+        logLifePreset(button.dataset.type);
+        break;
+
+      case 'open-life-log':
+        openLifeLogDialog({
+          type: button.dataset.type || 'custom',
+          label: button.dataset.label || '',
+          date: button.dataset.date || todayISO()
+        });
+        break;
+
+      case 'delete-life-log':
+        requestDeleteLifeLog(lifeId);
+        break;
+
       case 'open-backup':
         closeSidebar();
         closeSearch();
@@ -3690,9 +4354,9 @@
     1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6
   };
 
-  const ASSISTANT_GREETING = '你好，我是拾光助手。可以直接告诉我要做什么，例如：\n明天 10:00 写周报 @工作 #汇报\n每天 8:00 晨跑 @生活 #健康\n完成晨跑\n今天还有什么 / 打开本周\n\n我只在本机操作数据，不联网。';
+  const ASSISTANT_GREETING = '你好，我是拾光助手。可以直接告诉我要做什么，例如：\n明天 10:00 写周报 @工作 #汇报\n每天 8:00 晨跑 @生活 #健康\n完成晨跑\n今天洗头了 / 写日记\n今天还有什么 / 打开本周\n\n我只在本机操作数据，不联网。';
 
-  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 补打卡：待补打卡 / 最近错过了什么\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 备份：打开备份 / 数据备份\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
+  const ASSISTANT_HELP = '目前支持的指令：\n• 新建：明天 15:00 提交周报 @工作 #汇报\n• 循环：每天 8:00 晨跑 @生活 #健康\n• 完成：完成晨跑 / 把晨跑标记完成\n• 查询：今天还有什么 / 明天安排 / 本周事项\n• 补打卡：待补打卡 / 最近错过了什么\n• 记录：写日记 / 打开生活打卡 / 今天洗头了\n• 跳转：打开本周 / 打开期限记录 / 打开工作 / 新建事项\n• 备份：打开备份 / 数据备份\n• 搜索：搜索 发票\n循环任务和标签会直接写进页面，和手动操作同一份数据。';
 
   function openAssistant() {
     if (!assistantStarted) {
@@ -4161,6 +4825,19 @@
           toast: '已打开期限记录。'
         };
       }
+      if (['日记', '321日记', '321 日记', '电子日记'].includes(target)) {
+        return {
+          close: true,
+          after: () => {
+            ui.diaryDate = todayISO();
+            switchView('diary');
+          },
+          toast: '已打开 321 日记。'
+        };
+      }
+      if (['生活打卡', '生活记录', '生活小事'].includes(target)) {
+        return { close: true, after: () => switchView('life'), toast: '已打开生活打卡。' };
+      }
       const category = findAssistantCategory(target);
       if (category) {
         return {
@@ -4184,6 +4861,31 @@
           toast: `正在搜索「${query}」。`
         };
       }
+    }
+
+    const lifeActionMatch = text.match(/^(?:今天|刚刚|记录一下|记一下|打卡)?\s*(洗头|洗澡|剪指甲|换床单|运动|面膜)(?:了|打卡|记录)?$/);
+    if (lifeActionMatch) {
+      const preset = LIFE_LOG_PRESETS.find((item) => item.label === lifeActionMatch[1]);
+      if (preset) {
+        return {
+          close: true,
+          after: () => {
+            switchView('life');
+            logLifePreset(preset.id);
+          }
+        };
+      }
+    }
+
+    if (/^(写日记|记日记|打开日记|去日记|321日记|321 日记|电子日记)$/.test(text)) {
+      return {
+        close: true,
+        after: () => {
+          ui.diaryDate = todayISO();
+          switchView('diary');
+        },
+        toast: '已打开 321 日记。'
+      };
     }
 
     if (/^(今天|今日)(呢|有什么|还有什么|的安排|安排|待办|事项|要做|计划|怎么安排)?$/.test(text)
@@ -4261,10 +4963,27 @@
         return;
       }
 
+      const searchDiary = target.closest('[data-search-diary-date]');
+      if (searchDiary) {
+        const date = searchDiary.dataset.searchDiaryDate;
+        closeSearch();
+        if (ui.view === 'diary') saveDiaryEntry({ silent: true, rerender: false });
+        ui.diaryDate = date;
+        switchView('diary');
+        return;
+      }
+
+      const searchLife = target.closest('[data-search-life-id]');
+      if (searchLife) {
+        closeSearch();
+        switchView('life');
+        return;
+      }
+
       const navButton = target.closest('[data-view]');
       if (navButton) {
         const view = navButton.dataset.view;
-        if (view === 'overview' || view === 'week' || view === 'expiry') switchView(view);
+        if (['overview', 'week', 'expiry', 'diary', 'life'].includes(view)) switchView(view);
         return;
       }
 
@@ -4304,6 +5023,32 @@
 
     dom.backupFileInput.addEventListener('change', handleBackupFile);
 
+    dom.viewRoot.addEventListener('submit', (event) => {
+      if (event.target.id !== 'diaryForm') return;
+      event.preventDefault();
+      saveDiaryEntry({ silent: false, rerender: true });
+    });
+
+    dom.viewRoot.addEventListener('change', (event) => {
+      if (event.target.id === 'diaryDateInput') changeDiaryDate(event.target.value);
+    });
+
+    dom.viewRoot.addEventListener('focusout', (event) => {
+      if (ui.view !== 'diary') return;
+      if (event.target instanceof Element && event.target.closest('#diaryForm')) {
+        saveDiaryEntry({ silent: true, rerender: false });
+      }
+    });
+
+    dom.viewRoot.addEventListener('keydown', (event) => {
+      if (ui.view !== 'diary') return;
+      if (!(event.target instanceof Element) || !event.target.closest('#diaryForm')) return;
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        saveDiaryEntry({ silent: false, rerender: true });
+      }
+    });
+
     dom.taskForm.addEventListener('submit', (event) => {
       event.preventDefault();
       submitTaskForm();
@@ -4342,6 +5087,11 @@
 
     dom.categoryForm.addEventListener('input', updateCategoryPreview);
     dom.categoryForm.addEventListener('change', updateCategoryPreview);
+
+    dom.lifeLogForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitLifeLogForm();
+    });
 
     dom.expiryForm.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -4426,7 +5176,7 @@
       closeDialog(dom.confirmDialog);
     });
 
-    [dom.taskDialog, dom.categoryDialog, dom.expiryDialog, dom.backupDialog, dom.confirmDialog, dom.assistantDialog].forEach((dialog) => {
+    [dom.taskDialog, dom.categoryDialog, dom.expiryDialog, dom.backupDialog, dom.lifeLogDialog, dom.confirmDialog, dom.assistantDialog].forEach((dialog) => {
       dialog.addEventListener('click', (event) => {
         if (event.target === dialog) dialog.close();
       });
@@ -4504,6 +5254,12 @@
         }
       }
     });
+
+    const flushDiaryOnLeave = () => {
+      if (ui.view === 'diary') saveDiaryEntry({ silent: true, rerender: false });
+    };
+    window.addEventListener('pagehide', flushDiaryOnLeave);
+    window.addEventListener('beforeunload', flushDiaryOnLeave);
 
     window.addEventListener('resize', () => {
       if (window.innerWidth > 1120 && dom.sidebar.classList.contains('is-open')) {

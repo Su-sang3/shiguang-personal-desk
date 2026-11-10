@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#f7f8fb">
-  <meta name="description" content="拾光 · 本地个人工作台，用温柔的方式安排工作、学习、生活与购物。">
+  <meta name="description" content="拾光 · 本地个人工作台，用温柔的方式安排工作、学习、生活与购物，也记录日记和生活小事。">
   <title>拾光 · 本地个人工作台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23F17C6D'/%3E%3Cpath d='M32 13l3.8 13.2L49 30l-13.2 3.8L32 47l-3.8-13.2L15 30l13.2-3.8z' fill='white'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=20261110a">
+  <link rel="stylesheet" href="styles.css?v=20261110b">
   <script>
     (() => {
       try {
@@ -56,6 +56,18 @@
           </button>
 
           <div class="nav-label-row">
+            <p class="nav-label">记录</p>
+          </div>
+          <button class="nav-item" data-view="diary" data-nav="diary" type="button">
+            <span class="nav-icon" data-icon="book"></span>
+            <span>321 日记</span>
+          </button>
+          <button class="nav-item" data-view="life" data-nav="life" type="button">
+            <span class="nav-icon" data-icon="coffee"></span>
+            <span>生活打卡</span>
+          </button>
+
+          <div class="nav-label-row">
             <p class="nav-label">我的分类</p>
             <span class="nav-label-meta" id="categoryCount">0</span>
           </div>
@@ -97,7 +109,7 @@
           <div class="search-wrap" id="searchWrap" role="search">
             <div class="search-box">
               <span class="search-icon" data-icon="search"></span>
-              <input id="searchInput" type="search" placeholder="搜索事项、期限记录、分类或备注…" autocomplete="off" aria-label="搜索事项与期限记录">
+              <input id="searchInput" type="search" placeholder="搜索事项、期限、日记、生活记录…" autocomplete="off" aria-label="搜索事项、期限记录、日记与生活记录">
               <kbd class="search-kbd">/</kbd>
             </div>
             <div class="search-results" id="searchResults" hidden></div>
@@ -437,6 +449,43 @@
     </div>
   </dialog>
 
+  <!-- 生活小事记录 -->
+  <dialog class="modal" id="lifeLogDialog" aria-labelledby="lifeLogTitle">
+    <form class="modal-card modal-card-sm" id="lifeLogForm" novalidate>
+      <input type="hidden" id="lifeLogType">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker">LITTLE THINGS</p>
+          <h2 id="lifeLogTitle">记一件生活小事</h2>
+        </div>
+        <button class="icon-btn" type="button" data-close-dialog="lifeLogDialog" aria-label="关闭">
+          <span data-icon="x"></span>
+        </button>
+      </header>
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">做了什么 <em>*</em></span>
+          <input id="lifeLogLabel" name="lifeLogLabel" type="text" maxlength="20" autocomplete="off" placeholder="比如：洗头、敷面膜、浇花">
+        </label>
+        <label class="field">
+          <span class="field-label">日期 <em>*</em></span>
+          <input id="lifeLogDate" name="lifeLogDate" type="date">
+        </label>
+        <label class="field">
+          <span class="field-label">备注 <span class="optional">可选</span></span>
+          <textarea id="lifeLogNote" name="lifeLogNote" rows="3" maxlength="200" placeholder="比如：用了新的洗发水"></textarea>
+        </label>
+        <p class="form-error" id="lifeLogError" role="alert"></p>
+      </div>
+      <footer class="modal-footer">
+        <div class="modal-actions">
+          <button class="btn btn-ghost" type="button" data-close-dialog="lifeLogDialog">取消</button>
+          <button class="btn btn-primary" type="submit">记下来</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- 确认弹窗 -->
   <dialog class="modal" id="confirmDialog" aria-labelledby="confirmTitle">
     <div class="modal-card modal-card-xs">
@@ -498,6 +547,6 @@
     <span class="toast-message" id="toastMessage"></span>
   </div>
 
-  <script src="app.js?v=20261110a"></script>
+  <script src="app.js?v=20261110b"></script>
 </body>
 </html>
